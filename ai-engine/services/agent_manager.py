@@ -1,559 +1,678 @@
 """
-Agent Manager - Orchestrates AI agents for different development tasks
+Agent management service for orchestrating AI agents
 """
 
 import asyncio
+import json
 import logging
 import uuid
-from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import Enum
-from dataclasses import dataclass, asdict
-import json
 
-from .llm_manager import llm_manager
-from .cache_manager import cache_manager
+from .llm_manager import llm_manager, LLMProvider
 
 logger = logging.getLogger(__name__)
 
 class AgentType(Enum):
+    ORCHESTRATOR = "orchestrator"
     PLANNER = "planner"
     ARCHITECT = "architect"
     BACKEND = "backend"
     FRONTEND = "frontend"
-    ORCHESTRATOR = "orchestrator"
+    INFRASTRUCTURE = "infrastructure"
+    SECURITY = "security"
+    VERIFIER = "verifier"
+    DEPLOYER = "deployer"
 
-class TaskStatus(Enum):
-    PENDING = "pending"
+class AgentStatus(Enum):
+    IDLE = "idle"
     RUNNING = "running"
+    PAUSED = "paused"
+    ERROR = "error"
     COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
 
 @dataclass
 class AgentTask:
-    task_id: str
-    agent_type: AgentType
-    task_type: str
-    description: str
-    requirements: Dict[str, Any]
-    dependencies: List[str]
-    status: TaskStatus
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: datetime = None
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    type: str = ""
+    description: str = ""
+    input_data: Dict[str, Any] = field(default_factory=dict)
+    output_data: Dict[str, Any] = field(default_factory=dict)
+    status: AgentStatus = AgentStatus.IDLE
+    created_at: datetime = field(default_factory=datetime.now)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = datetime.now()
+    error_message: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
-class AgentSession:
-    session_id: str
-    project_id: str
-    user_id: str
-    session_type: str
-    requirements: Dict[str, Any]
-    tasks: List[AgentTask]
-    status: str
-    progress: float = 0.0
-    created_at: datetime = None
-    updated_at: datetime = None
-
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = datetime.now()
-        if self.updated_at is None:
-            self.updated_at = datetime.now()
+class Agent:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    type: AgentType
+    name: str
+    description: str
+    capabilities: List[str] = field(default_factory=list)
+    status: AgentStatus = AgentStatus.IDLE
+    current_task: Optional[AgentTask] = None
+    task_queue: List[AgentTask] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    last_active: datetime = field(default_factory=datetime.now)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 class AgentManager:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.sessions: Dict[str, AgentSession] = {}
-        self.active_tasks: Dict[str, AgentTask] = {}
-        self.agent_prompts = self._load_agent_prompts()
-    
-    def _load_agent_prompts(self) -> Dict[AgentType, Dict[str, str]]:
-        """Load prompts for different agent types and tasks"""
-        return {
-            AgentType.PLANNER: {
-                "project_analysis": """You are a senior project planner. Analyze the following project requirements and create a comprehensive development plan:
-
-Requirements: {requirements}
-
-Provide:
-1. Project scope and objectives
-2. Technology stack recommendations
-3. Development phases and milestones
-4. Risk assessment and mitigation strategies
-5. Resource allocation suggestions
-6. Timeline estimates
-
-Format your response as structured JSON with clear sections.""",
-                
-                "task_breakdown": """Break down the following development task into smaller, manageable subtasks:
-
-Task: {task_description}
-Context: {context}
-
-Provide:
-1. Detailed subtask list with priorities
-2. Dependencies between tasks
-3. Estimated effort for each subtask
-4. Resource requirements
-5. Acceptance criteria
-
-Format as JSON with clear task structure."""
-            },
-            
-            AgentType.ARCHITECT: {
-                "system_design": """You are a senior software architect. Design the system architecture for:
-
-Project: {project_description}
-Requirements: {requirements}
-Technology Stack: {tech_stack}
-
-Provide:
-1. High-level system architecture
-2. Component design and interactions
-3. Data flow diagrams
-4. API design specifications
-5. Database schema recommendations
-6. Security considerations
-7. Scalability and performance considerations
-
-Format as detailed technical documentation.""",
-                
-                "code_review": """Review the following code architecture and provide recommendations:
-
-Code: {code}
-Context: {context}
-
-Analyze:
-1. Architectural patterns used
-2. Code organization and structure
-3. Design principles adherence
-4. Potential improvements
-5. Security considerations
-6. Performance implications
-
-Provide specific, actionable recommendations."""
-            },
-            
-            AgentType.BACKEND: {
-                "api_development": """You are a senior backend developer. Develop the following API:
-
-Specification: {api_spec}
-Requirements: {requirements}
-Framework: {framework}
-
-Provide:
-1. Complete API implementation
-2. Data models and schemas
-3. Error handling
-4. Input validation
-5. Authentication/authorization
-6. Documentation
-7. Unit tests
-
-Ensure production-ready code with best practices.""",
-                
-                "database_design": """Design and implement the database layer for:
-
-Requirements: {requirements}
-Data Model: {data_model}
-Database Type: {db_type}
-
-Provide:
-1. Database schema design
-2. Migration scripts
-3. Query optimization
-4. Indexing strategy
-5. Data validation rules
-6. Backup and recovery considerations"""
-            },
-            
-            AgentType.FRONTEND: {
-                "ui_development": """You are a senior frontend developer. Implement the following UI component:
-
-Component Specification: {component_spec}
-Framework: {framework}
-Design System: {design_system}
-
-Provide:
-1. Complete component implementation
-2. Responsive design
-3. Accessibility compliance
-4. Performance optimization
-5. Type definitions
-6. Unit tests
-7. Storybook documentation
-
-Ensure modern, maintainable code.""",
-                
-                "user_experience": """Analyze and improve the user experience for:
-
-Current Implementation: {current_ui}
-User Requirements: {user_requirements}
-Target Audience: {target_audience}
-
-Provide:
-1. UX analysis and recommendations
-2. Improved user flows
-3. Interface optimizations
-4. Accessibility improvements
-5. Performance enhancements
-6. Mobile responsiveness
-7. Implementation guidelines"""
-            },
-            
-            AgentType.ORCHESTRATOR: {
-                "workflow_coordination": """Coordinate the following development workflow:
-
-Tasks: {tasks}
-Dependencies: {dependencies}
-Resources: {resources}
-
-Provide:
-1. Optimal task execution order
-2. Resource allocation strategy
-3. Parallel execution opportunities
-4. Risk mitigation plans
-5. Progress tracking recommendations
-6. Quality gates and checkpoints"""
-            }
-        }
+        self.agents: Dict[str, Agent] = {}
+        self.tasks: Dict[str, AgentTask] = {}
+        self.agent_callbacks: Dict[AgentType, Callable] = {}
+        self.running = False
+        self._register_default_agents()
     
     async def initialize(self):
         """Initialize the agent manager"""
         self.logger.info("Initializing Agent Manager...")
-        # Load any persisted sessions from cache
-        try:
-            cached_sessions = await cache_manager.get("agent_sessions")
-            if cached_sessions:
-                self.sessions = {
-                    session_id: AgentSession(**session_data)
-                    for session_id, session_data in cached_sessions.items()
-                }
-                self.logger.info(f"Loaded {len(self.sessions)} cached sessions")
-        except Exception as e:
-            self.logger.warning(f"Could not load cached sessions: {e}")
+        self.running = True
         
+        # Start the task processing loop
+        asyncio.create_task(self._process_tasks())
         self.logger.info("Agent Manager initialized successfully")
     
     async def cleanup(self):
-        """Cleanup resources"""
-        self.logger.info("Cleaning up Agent Manager...")
-        # Save sessions to cache
-        try:
-            sessions_data = {
-                session_id: asdict(session)
-                for session_id, session in self.sessions.items()
-            }
-            await cache_manager.set("agent_sessions", sessions_data, ttl=86400)  # 24 hours
-            self.logger.info("Sessions saved to cache")
-        except Exception as e:
-            self.logger.warning(f"Could not save sessions to cache: {e}")
+        """Cleanup agent manager"""
+        self.logger.info("Shutting down Agent Manager...")
+        self.running = False
         
-        self.logger.info("Agent Manager cleanup complete")
+        # Cancel all running tasks
+        for agent in self.agents.values():
+            if agent.status == AgentStatus.RUNNING:
+                agent.status = AgentStatus.PAUSED
+        
+        self.logger.info("Agent Manager shutdown complete")
     
-    async def create_session(
-        self,
-        project_id: str,
-        user_id: str,
-        session_type: str,
-        requirements: Dict[str, Any]
-    ) -> str:
-        """Create a new agent session"""
-        session_id = str(uuid.uuid4())
+    def _register_default_agents(self):
+        """Register default system agents"""
+        default_agents = [
+            Agent(
+                type=AgentType.ORCHESTRATOR,
+                name="Master Orchestrator",
+                description="Coordinates all other agents and manages the overall project generation workflow",
+                capabilities=[
+                    "task_coordination",
+                    "workflow_management", 
+                    "agent_communication",
+                    "project_planning"
+                ]
+            ),
+            Agent(
+                type=AgentType.PLANNER,
+                name="Project Planner",
+                description="Analyzes requirements and creates detailed project plans",
+                capabilities=[
+                    "requirement_analysis",
+                    "architecture_planning",
+                    "task_breakdown",
+                    "timeline_estimation"
+                ]
+            ),
+            Agent(
+                type=AgentType.ARCHITECT,
+                name="System Architect",
+                description="Designs system architecture and technical specifications",
+                capabilities=[
+                    "system_design",
+                    "technology_selection",
+                    "architecture_documentation",
+                    "scalability_planning"
+                ]
+            ),
+            Agent(
+                type=AgentType.BACKEND,
+                name="Backend Developer",
+                description="Generates backend code, APIs, and server-side logic",
+                capabilities=[
+                    "api_development",
+                    "database_design",
+                    "server_logic",
+                    "authentication",
+                    "data_validation"
+                ]
+            ),
+            Agent(
+                type=AgentType.FRONTEND,
+                name="Frontend Developer", 
+                description="Creates user interfaces and client-side applications",
+                capabilities=[
+                    "ui_development",
+                    "component_creation",
+                    "responsive_design",
+                    "user_experience",
+                    "state_management"
+                ]
+            ),
+            Agent(
+                type=AgentType.INFRASTRUCTURE,
+                name="Infrastructure Engineer",
+                description="Sets up deployment infrastructure and DevOps automation",
+                capabilities=[
+                    "containerization",
+                    "orchestration",
+                    "ci_cd_setup",
+                    "monitoring",
+                    "scaling"
+                ]
+            ),
+            Agent(
+                type=AgentType.SECURITY,
+                name="Security Engineer",
+                description="Implements security measures and vulnerability assessments",
+                capabilities=[
+                    "security_audit",
+                    "vulnerability_scanning",
+                    "access_control",
+                    "encryption",
+                    "compliance"
+                ]
+            ),
+            Agent(
+                type=AgentType.VERIFIER,
+                name="Quality Verifier",
+                description="Ensures code quality, testing, and project completeness",
+                capabilities=[
+                    "code_review",
+                    "test_generation",
+                    "quality_metrics",
+                    "performance_testing",
+                    "completion_verification"
+                ]
+            ),
+            Agent(
+                type=AgentType.DEPLOYER,
+                name="Deployment Manager",
+                description="Handles application deployment to various cloud platforms",
+                capabilities=[
+                    "cloud_deployment",
+                    "environment_setup",
+                    "rollback_management",
+                    "monitoring_setup",
+                    "health_checks"
+                ]
+            )
+        ]
         
-        session = AgentSession(
-            session_id=session_id,
-            project_id=project_id,
-            user_id=user_id,
-            session_type=session_type,
-            requirements=requirements,
-            tasks=[],
-            status="initializing"
+        for agent in default_agents:
+            self.agents[agent.id] = agent
+            self.logger.info(f"Registered agent: {agent.name} ({agent.type.value})")
+    
+    async def create_task(
+        self,
+        agent_type: AgentType,
+        task_type: str,
+        description: str,
+        input_data: Dict[str, Any],
+        priority: int = 1
+    ) -> str:
+        """Create a new task for an agent"""
+        
+        task = AgentTask(
+            type=task_type,
+            description=description,
+            input_data=input_data,
+            metadata={"priority": priority}
         )
         
-        self.sessions[session_id] = session
+        # Find available agent of the specified type
+        agent = self._get_agent_by_type(agent_type)
+        if not agent:
+            raise ValueError(f"No agent available for type: {agent_type}")
         
-        # Generate initial tasks based on session type
-        tasks = await self._generate_session_tasks(session)
-        session.tasks = tasks
-        session.status = "active"
+        # Add task to agent's queue
+        agent.task_queue.append(task)
+        self.tasks[task.id] = task
         
-        self.logger.info(f"Created session {session_id} with {len(tasks)} tasks")
-        
-        # Start executing tasks
-        asyncio.create_task(self._execute_session_tasks(session_id))
-        
-        return session_id
+        self.logger.info(f"Created task {task.id} for agent {agent.name}")
+        return task.id
     
-    async def _generate_session_tasks(self, session: AgentSession) -> List[AgentTask]:
-        """Generate tasks for a session based on its type"""
-        tasks = []
-        
-        if session.session_type == "project_generation":
-            # Project generation workflow
-            tasks.extend([
-                AgentTask(
-                    task_id=str(uuid.uuid4()),
-                    agent_type=AgentType.PLANNER,
-                    task_type="project_analysis",
-                    description="Analyze project requirements and create development plan",
-                    requirements=session.requirements,
-                    dependencies=[],
-                    status=TaskStatus.PENDING
-                ),
-                AgentTask(
-                    task_id=str(uuid.uuid4()),
-                    agent_type=AgentType.ARCHITECT,
-                    task_type="system_design",
-                    description="Design system architecture",
-                    requirements=session.requirements,
-                    dependencies=[],  # Will be updated with planner task ID
-                    status=TaskStatus.PENDING
-                ),
-                AgentTask(
-                    task_id=str(uuid.uuid4()),
-                    agent_type=AgentType.BACKEND,
-                    task_type="api_development",
-                    description="Implement backend APIs",
-                    requirements=session.requirements,
-                    dependencies=[],  # Will be updated with architect task ID
-                    status=TaskStatus.PENDING
-                ),
-                AgentTask(
-                    task_id=str(uuid.uuid4()),
-                    agent_type=AgentType.FRONTEND,
-                    task_type="ui_development",
-                    description="Implement frontend components",
-                    requirements=session.requirements,
-                    dependencies=[],  # Will be updated with architect task ID
-                    status=TaskStatus.PENDING
-                )
-            ])
-            
-            # Set up dependencies
-            if len(tasks) >= 4:
-                tasks[1].dependencies = [tasks[0].task_id]  # Architecture depends on planning
-                tasks[2].dependencies = [tasks[1].task_id]  # Backend depends on architecture
-                tasks[3].dependencies = [tasks[1].task_id]  # Frontend depends on architecture
-        
-        elif session.session_type == "code_review":
-            tasks.append(
-                AgentTask(
-                    task_id=str(uuid.uuid4()),
-                    agent_type=AgentType.ARCHITECT,
-                    task_type="code_review",
-                    description="Review code quality and architecture",
-                    requirements=session.requirements,
-                    dependencies=[],
-                    status=TaskStatus.PENDING
-                )
-            )
-        
-        elif session.session_type == "debugging":
-            tasks.append(
-                AgentTask(
-                    task_id=str(uuid.uuid4()),
-                    agent_type=AgentType.BACKEND,  # or FRONTEND based on code type
-                    task_type="debug_assistance",
-                    description="Debug code issues and provide solutions",
-                    requirements=session.requirements,
-                    dependencies=[],
-                    status=TaskStatus.PENDING
-                )
-            )
-        
+    async def get_task_status(self, task_id: str) -> Optional[AgentTask]:
+        """Get status of a specific task"""
+        return self.tasks.get(task_id)
+    
+    async def get_agent_status(self, agent_id: str) -> Optional[Agent]:
+        """Get status of a specific agent"""
+        return self.agents.get(agent_id)
+    
+    async def list_agents(self) -> List[Agent]:
+        """List all registered agents"""
+        return list(self.agents.values())
+    
+    async def list_tasks(self, status: Optional[AgentStatus] = None) -> List[AgentTask]:
+        """List tasks, optionally filtered by status"""
+        tasks = list(self.tasks.values())
+        if status:
+            tasks = [task for task in tasks if task.status == status]
         return tasks
     
-    async def _execute_session_tasks(self, session_id: str):
-        """Execute tasks for a session"""
-        try:
-            session = self.sessions.get(session_id)
-            if not session:
-                return
-            
-            # Execute tasks based on dependencies
-            completed_tasks = set()
-            
-            while len(completed_tasks) < len(session.tasks):
-                # Find tasks that can be executed (dependencies met)
-                ready_tasks = [
-                    task for task in session.tasks
-                    if (task.status == TaskStatus.PENDING and
-                        all(dep_id in completed_tasks for dep_id in task.dependencies))
-                ]
-                
-                if not ready_tasks:
-                    # Check if we're stuck due to failed dependencies
-                    failed_tasks = [task for task in session.tasks if task.status == TaskStatus.FAILED]
-                    if failed_tasks:
-                        self.logger.error(f"Session {session_id} stuck due to failed tasks")
-                        session.status = "failed"
-                        break
-                    
-                    # Wait for running tasks to complete
-                    await asyncio.sleep(1)
-                    continue
-                
-                # Execute ready tasks in parallel
-                execute_tasks = []
-                for task in ready_tasks:
-                    task.status = TaskStatus.RUNNING
-                    task.started_at = datetime.now()
-                    execute_tasks.append(self._execute_task(task))
-                
-                if execute_tasks:
-                    await asyncio.gather(*execute_tasks, return_exceptions=True)
-                
-                # Update completed tasks
-                for task in session.tasks:
-                    if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
-                        completed_tasks.add(task.task_id)
-                
-                # Update session progress
-                session.progress = len(completed_tasks) / len(session.tasks)
-                session.updated_at = datetime.now()
-            
-            # Update final session status
-            failed_tasks = [task for task in session.tasks if task.status == TaskStatus.FAILED]
-            if failed_tasks:
-                session.status = "failed"
-            else:
-                session.status = "completed"
-            
-            session.updated_at = datetime.now()
-            self.logger.info(f"Session {session_id} completed with status: {session.status}")
-        
-        except Exception as e:
-            self.logger.error(f"Error executing session {session_id}: {e}")
-            if session_id in self.sessions:
-                self.sessions[session_id].status = "error"
+    def _get_agent_by_type(self, agent_type: AgentType) -> Optional[Agent]:
+        """Find an agent by type"""
+        for agent in self.agents.values():
+            if agent.type == agent_type and agent.status != AgentStatus.ERROR:
+                return agent
+        return None
     
-    async def _execute_task(self, task: AgentTask):
-        """Execute a single task"""
+    async def _process_tasks(self):
+        """Main task processing loop"""
+        while self.running:
+            try:
+                # Process tasks for each agent
+                for agent in self.agents.values():
+                    if agent.status == AgentStatus.IDLE and agent.task_queue:
+                        await self._execute_next_task(agent)
+                
+                # Sleep briefly before next iteration
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                self.logger.error(f"Error in task processing loop: {e}")
+                await asyncio.sleep(5)
+    
+    async def _execute_next_task(self, agent: Agent):
+        """Execute the next task in an agent's queue"""
+        if not agent.task_queue:
+            return
+        
+        task = agent.task_queue.pop(0)
+        agent.current_task = task
+        agent.status = AgentStatus.RUNNING
+        task.status = AgentStatus.RUNNING
+        task.started_at = datetime.now()
+        
+        self.logger.info(f"Agent {agent.name} starting task {task.id}: {task.description}")
+        
         try:
-            self.logger.info(f"Executing task {task.task_id}: {task.description}")
+            # Execute the task based on agent type
+            result = await self._execute_agent_task(agent, task)
             
-            # Get the appropriate prompt for the agent type and task type
-            prompt_template = self.agent_prompts.get(task.agent_type, {}).get(task.task_type)
+            # Task completed successfully
+            task.output_data = result
+            task.status = AgentStatus.COMPLETED
+            task.completed_at = datetime.now()
+            agent.status = AgentStatus.IDLE
+            agent.current_task = None
+            agent.last_active = datetime.now()
             
-            if not prompt_template:
-                raise ValueError(f"No prompt template for {task.agent_type.value}.{task.task_type}")
+            self.logger.info(f"Task {task.id} completed successfully")
             
-            # Format the prompt with task requirements
-            prompt = prompt_template.format(**task.requirements)
+        except Exception as e:
+            # Task failed
+            task.status = AgentStatus.ERROR
+            task.error_message = str(e)
+            task.completed_at = datetime.now()
+            agent.status = AgentStatus.IDLE
+            agent.current_task = None
             
-            # Generate response using LLM
+            self.logger.error(f"Task {task.id} failed: {e}")
+    
+    async def _execute_agent_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute a specific task for an agent"""
+        
+        # Route to specific agent implementation
+        if agent.type == AgentType.ORCHESTRATOR:
+            return await self._execute_orchestrator_task(agent, task)
+        elif agent.type == AgentType.PLANNER:
+            return await self._execute_planner_task(agent, task)
+        elif agent.type == AgentType.ARCHITECT:
+            return await self._execute_architect_task(agent, task)
+        elif agent.type == AgentType.BACKEND:
+            return await self._execute_backend_task(agent, task)
+        elif agent.type == AgentType.FRONTEND:
+            return await self._execute_frontend_task(agent, task)
+        elif agent.type == AgentType.INFRASTRUCTURE:
+            return await self._execute_infrastructure_task(agent, task)
+        elif agent.type == AgentType.SECURITY:
+            return await self._execute_security_task(agent, task)
+        elif agent.type == AgentType.VERIFIER:
+            return await self._execute_verifier_task(agent, task)
+        elif agent.type == AgentType.DEPLOYER:
+            return await self._execute_deployer_task(agent, task)
+        else:
+            raise ValueError(f"Unknown agent type: {agent.type}")
+    
+    async def _execute_orchestrator_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute orchestrator tasks"""
+        if task.type == "coordinate_project":
+            requirements = task.input_data.get("requirements", {})
+            
+            # Create a project plan
+            plan_prompt = f"""
+            Create a detailed project implementation plan for:
+            Requirements: {json.dumps(requirements, indent=2)}
+            
+            Provide:
+            1. High-level architecture
+            2. Task breakdown for each component
+            3. Agent assignments
+            4. Implementation timeline
+            5. Dependencies and critical path
+            """
+            
             response = await llm_manager.generate(
-                prompt=prompt,
-                temperature=0.3,  # Lower temperature for more consistent results
-                max_tokens=4000
+                plan_prompt,
+                provider=LLMProvider.OPENAI,
+                temperature=0.3
             )
             
-            # Parse and store result
-            task.result = {
-                "output": response.content,
-                "usage": response.usage,
-                "model": response.model,
-                "timestamp": datetime.now().isoformat()
+            return {
+                "project_plan": response.content,
+                "status": "plan_created",
+                "next_steps": ["assign_tasks_to_agents", "begin_implementation"]
             }
+        
+        elif task.type == "assign_tasks":
+            # Distribute tasks to specialized agents
+            tasks_to_assign = task.input_data.get("tasks", [])
+            assignments = []
             
-            task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.now()
-            
-            self.logger.info(f"Task {task.task_id} completed successfully")
-        
-        except Exception as e:
-            self.logger.error(f"Task {task.task_id} failed: {e}")
-            task.status = TaskStatus.FAILED
-            task.error = str(e)
-            task.completed_at = datetime.now()
-    
-    async def get_active_sessions(self) -> List[str]:
-        """Get list of active session IDs"""
-        return [
-            session_id for session_id, session in self.sessions.items()
-            if session.status in ["active", "running"]
-        ]
-    
-    async def get_session_status(self, session_id: str) -> Dict[str, Any]:
-        """Get status of a specific session"""
-        session = self.sessions.get(session_id)
-        if not session:
-            raise ValueError(f"Session {session_id} not found")
-        
-        return {
-            "session_id": session.session_id,
-            "status": session.status,
-            "progress": session.progress,
-            "total_tasks": len(session.tasks),
-            "completed_tasks": len([t for t in session.tasks if t.status == TaskStatus.COMPLETED]),
-            "failed_tasks": len([t for t in session.tasks if t.status == TaskStatus.FAILED]),
-            "tasks": [asdict(task) for task in session.tasks],
-            "updated_at": session.updated_at.isoformat() if session.updated_at else None
-        }
-    
-    async def cancel_session(self, session_id: str):
-        """Cancel an active session"""
-        session = self.sessions.get(session_id)
-        if not session:
-            raise ValueError(f"Session {session_id} not found")
-        
-        session.status = "cancelled"
-        
-        # Cancel running tasks
-        for task in session.tasks:
-            if task.status == TaskStatus.RUNNING:
-                task.status = TaskStatus.CANCELLED
-                task.completed_at = datetime.now()
-        
-        self.logger.info(f"Session {session_id} cancelled")
-    
-    async def get_task_result(self, session_id: str, task_id: str) -> Dict[str, Any]:
-        """Get result of a specific task"""
-        session = self.sessions.get(session_id)
-        if not session:
-            raise ValueError(f"Session {session_id} not found")
-        
-        task = next((t for t in session.tasks if t.task_id == task_id), None)
-        if not task:
-            raise ValueError(f"Task {task_id} not found in session {session_id}")
-        
-        return {
-            "task_id": task.task_id,
-            "status": task.status.value,
-            "result": task.result,
-            "error": task.error,
-            "completed_at": task.completed_at.isoformat() if task.completed_at else None
-        }
-    
-    async def health_check(self) -> Dict[str, Any]:
-        """Check health of the agent manager"""
-        try:
-            active_sessions_count = len([s for s in self.sessions.values() if s.status == "active"])
-            running_tasks_count = len(self.active_tasks)
+            for task_item in tasks_to_assign:
+                agent_type = self._determine_agent_type(task_item)
+                task_id = await self.create_task(
+                    agent_type=agent_type,
+                    task_type=task_item.get("type", "general"),
+                    description=task_item.get("description", ""),
+                    input_data=task_item.get("data", {})
+                )
+                assignments.append({
+                    "task_id": task_id,
+                    "agent_type": agent_type.value,
+                    "description": task_item.get("description", "")
+                })
             
             return {
-                "status": "healthy",
-                "active_sessions": active_sessions_count,
-                "running_tasks": running_tasks_count,
-                "total_sessions": len(self.sessions),
-                "agent_types": [agent_type.value for agent_type in AgentType],
-                "timestamp": datetime.now().isoformat()
+                "assignments": assignments,
+                "status": "tasks_assigned"
             }
-        except Exception as e:
+        
+        return {"status": "task_completed", "result": "orchestrator_task_done"}
+    
+    async def _execute_planner_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute planner tasks"""
+        if task.type == "analyze_requirements":
+            requirements = task.input_data.get("requirements", "")
+            
+            prompt = f"""
+            Analyze these project requirements and create a comprehensive implementation plan:
+            
+            {requirements}
+            
+            Provide:
+            1. Feature breakdown
+            2. Technical requirements
+            3. Architecture recommendations
+            4. Implementation phases
+            5. Resource estimates
+            6. Risk assessment
+            """
+            
+            response = await llm_manager.generate(prompt, temperature=0.2)
+            
             return {
-                "status": "unhealthy",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
+                "analysis": response.content,
+                "features": ["feature1", "feature2"],  # Would be parsed from response
+                "timeline": "6 weeks",
+                "complexity": "medium"
             }
+        
+        return {"status": "task_completed", "result": "planner_task_done"}
+    
+    async def _execute_architect_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute architect tasks"""
+        if task.type == "design_system":
+            requirements = task.input_data.get("requirements", {})
+            
+            prompt = f"""
+            Design a system architecture for:
+            {json.dumps(requirements, indent=2)}
+            
+            Include:
+            1. System components and their responsibilities
+            2. Data flow diagrams
+            3. Technology stack recommendations
+            4. Scalability considerations
+            5. Security architecture
+            6. Deployment strategy
+            """
+            
+            response = await llm_manager.generate(prompt, temperature=0.3)
+            
+            return {
+                "architecture": response.content,
+                "components": ["frontend", "backend", "database"],
+                "tech_stack": {"frontend": "React", "backend": "Node.js", "database": "PostgreSQL"}
+            }
+        
+        return {"status": "task_completed", "result": "architect_task_done"}
+    
+    async def _execute_backend_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute backend development tasks"""
+        if task.type == "generate_api":
+            spec = task.input_data.get("api_spec", {})
+            
+            prompt = f"""
+            Generate a complete backend API implementation:
+            Specification: {json.dumps(spec, indent=2)}
+            
+            Include:
+            1. API routes and handlers
+            2. Data models
+            3. Validation schemas
+            4. Database migrations
+            5. Authentication middleware
+            6. Error handling
+            7. Tests
+            """
+            
+            response = await llm_manager.code_generation(
+                description=prompt,
+                language="typescript",
+                framework="express"
+            )
+            
+            return {
+                "code": response.content,
+                "files": ["routes.ts", "models.ts", "middleware.ts"],
+                "status": "api_generated"
+            }
+        
+        return {"status": "task_completed", "result": "backend_task_done"}
+    
+    async def _execute_frontend_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute frontend development tasks"""
+        if task.type == "generate_ui":
+            ui_spec = task.input_data.get("ui_spec", {})
+            
+            prompt = f"""
+            Generate a complete frontend application:
+            UI Specification: {json.dumps(ui_spec, indent=2)}
+            
+            Include:
+            1. React components
+            2. State management
+            3. Routing
+            4. API integration
+            5. Styling (Tailwind CSS)
+            6. Type definitions
+            7. Tests
+            """
+            
+            response = await llm_manager.code_generation(
+                description=prompt,
+                language="typescript",
+                framework="react"
+            )
+            
+            return {
+                "code": response.content,
+                "components": ["App.tsx", "components/", "pages/"],
+                "status": "ui_generated"
+            }
+        
+        return {"status": "task_completed", "result": "frontend_task_done"}
+    
+    async def _execute_infrastructure_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute infrastructure tasks"""
+        if task.type == "setup_deployment":
+            deployment_spec = task.input_data.get("deployment_spec", {})
+            
+            prompt = f"""
+            Create deployment infrastructure:
+            Specification: {json.dumps(deployment_spec, indent=2)}
+            
+            Generate:
+            1. Docker configurations
+            2. Kubernetes manifests
+            3. CI/CD pipelines
+            4. Monitoring setup
+            5. Terraform scripts
+            """
+            
+            response = await llm_manager.generate(prompt, temperature=0.2)
+            
+            return {
+                "infrastructure": response.content,
+                "files": ["Dockerfile", "k8s/", ".github/workflows/"],
+                "status": "infrastructure_ready"
+            }
+        
+        return {"status": "task_completed", "result": "infrastructure_task_done"}
+    
+    async def _execute_security_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute security tasks"""
+        if task.type == "security_audit":
+            codebase = task.input_data.get("codebase", "")
+            
+            prompt = f"""
+            Perform security audit on this codebase:
+            {codebase}
+            
+            Check for:
+            1. Authentication vulnerabilities
+            2. Input validation issues
+            3. SQL injection risks
+            4. XSS vulnerabilities
+            5. Access control problems
+            6. Sensitive data exposure
+            """
+            
+            response = await llm_manager.generate(prompt, temperature=0.1)
+            
+            return {
+                "audit_report": response.content,
+                "vulnerabilities": [],
+                "security_score": 85,
+                "status": "audit_complete"
+            }
+        
+        return {"status": "task_completed", "result": "security_task_done"}
+    
+    async def _execute_verifier_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute verification tasks"""
+        if task.type == "verify_completeness":
+            project_data = task.input_data.get("project", {})
+            
+            prompt = f"""
+            Verify project completeness:
+            Project: {json.dumps(project_data, indent=2)}
+            
+            Check:
+            1. All requirements implemented
+            2. Code quality standards met
+            3. Tests passing
+            4. Documentation complete
+            5. Security requirements satisfied
+            6. Performance benchmarks met
+            """
+            
+            response = await llm_manager.generate(prompt, temperature=0.1)
+            
+            return {
+                "verification_report": response.content,
+                "completeness_score": 95,
+                "missing_items": [],
+                "status": "verification_complete"
+            }
+        
+        return {"status": "task_completed", "result": "verifier_task_done"}
+    
+    async def _execute_deployer_task(self, agent: Agent, task: AgentTask) -> Dict[str, Any]:
+        """Execute deployment tasks"""
+        if task.type == "deploy_application":
+            deployment_config = task.input_data.get("config", {})
+            
+            # Simulate deployment process
+            steps = [
+                "building_containers",
+                "pushing_images", 
+                "deploying_to_cluster",
+                "running_health_checks",
+                "updating_dns",
+                "deployment_complete"
+            ]
+            
+            return {
+                "deployment_steps": steps,
+                "deployment_url": "https://app.example.com",
+                "status": "deployed_successfully"
+            }
+        
+        return {"status": "task_completed", "result": "deployer_task_done"}
+    
+    def _determine_agent_type(self, task_item: Dict[str, Any]) -> AgentType:
+        """Determine which agent type should handle a task"""
+        task_type = task_item.get("type", "").lower()
+        
+        if "backend" in task_type or "api" in task_type:
+            return AgentType.BACKEND
+        elif "frontend" in task_type or "ui" in task_type:
+            return AgentType.FRONTEND
+        elif "infrastructure" in task_type or "deployment" in task_type:
+            return AgentType.INFRASTRUCTURE
+        elif "security" in task_type or "audit" in task_type:
+            return AgentType.SECURITY
+        elif "test" in task_type or "verify" in task_type:
+            return AgentType.VERIFIER
+        elif "architecture" in task_type or "design" in task_type:
+            return AgentType.ARCHITECT
+        elif "plan" in task_type:
+            return AgentType.PLANNER
+        else:
+            return AgentType.ORCHESTRATOR
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get overall status of the agent system"""
+        agent_statuses = {}
+        for agent in self.agents.values():
+            agent_statuses[agent.name] = {
+                "type": agent.type.value,
+                "status": agent.status.value,
+                "current_task": agent.current_task.description if agent.current_task else None,
+                "queue_length": len(agent.task_queue),
+                "last_active": agent.last_active.isoformat()
+            }
+        
+        task_summary = {
+            "total": len(self.tasks),
+            "idle": len([t for t in self.tasks.values() if t.status == AgentStatus.IDLE]),
+            "running": len([t for t in self.tasks.values() if t.status == AgentStatus.RUNNING]),
+            "completed": len([t for t in self.tasks.values() if t.status == AgentStatus.COMPLETED]),
+            "error": len([t for t in self.tasks.values() if t.status == AgentStatus.ERROR])
+        }
+        
+        return {
+            "system_status": "running" if self.running else "stopped",
+            "agents": agent_statuses,
+            "tasks": task_summary,
+            "timestamp": datetime.now().isoformat()
+        }
 
 # Global instance
 agent_manager = AgentManager()

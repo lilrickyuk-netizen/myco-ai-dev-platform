@@ -1,6 +1,11 @@
+# Prometheus configuration for MYCO platform monitoring
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    cluster: 'myco-platform'
+    environment: 'development'
 
 rule_files:
   - "alert.rules.yml"
@@ -13,114 +18,149 @@ alerting:
           - alertmanager:9093
 
 scrape_configs:
-  # Prometheus itself
-  - job_name: 'prometheus'
+  # Backend API monitoring
+  - job_name: 'myco-backend'
     static_configs:
-      - targets: ['localhost:9090']
-
-  # Backend API
-  - job_name: 'backend'
-    static_configs:
-      - targets: ['backend:3000']
+      - targets: ['backend:3001']
     metrics_path: '/metrics'
-    scrape_interval: 30s
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    params:
+      format: ['prometheus']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'backend'
 
-  # AI Engine
-  - job_name: 'ai-engine'
+  # AI Engine monitoring
+  - job_name: 'myco-ai-engine'
     static_configs:
       - targets: ['ai-engine:8000']
     metrics_path: '/metrics'
     scrape_interval: 30s
+    scrape_timeout: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'ai-engine'
 
-  # Execution Engine
-  - job_name: 'execution-engine'
+  # Execution Engine monitoring
+  - job_name: 'myco-execution-engine'
     static_configs:
-      - targets: ['execution-engine:8001']
+      - targets: ['execution-engine:3002']
     metrics_path: '/metrics'
-    scrape_interval: 30s
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'execution-engine'
 
-  # Node Exporter (System metrics)
-  - job_name: 'node-exporter'
-    static_configs:
-      - targets: ['node-exporter:9100']
-
-  # PostgreSQL
+  # PostgreSQL monitoring
   - job_name: 'postgres'
     static_configs:
       - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+    scrape_timeout: 10s
 
-  # Redis
+  # Redis monitoring
   - job_name: 'redis'
     static_configs:
       - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+    scrape_timeout: 10s
 
-  # MongoDB
-  - job_name: 'mongodb'
+  # Node exporter for system metrics
+  - job_name: 'node-exporter'
     static_configs:
-      - targets: ['mongodb-exporter:9216']
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    scrape_timeout: 10s
 
-  # Nginx
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['nginx-exporter:9113']
-
-  # Docker
+  # Docker metrics
   - job_name: 'docker'
     static_configs:
       - targets: ['cadvisor:8080']
-    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
 
-  # Kubernetes (if running on K8s)
+  # NGINX metrics
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Kubernetes monitoring (if deployed on K8s)
   - job_name: 'kubernetes-apiservers'
     kubernetes_sd_configs:
-      - role: endpoints
+    - role: endpoints
     scheme: https
     tls_config:
       ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
     bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
     relabel_configs:
-      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-        action: keep
-        regex: default;kubernetes;https
+    - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+      action: keep
+      regex: default;kubernetes;https
 
   - job_name: 'kubernetes-nodes'
     kubernetes_sd_configs:
-      - role: node
+    - role: node
     scheme: https
     tls_config:
       ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
     bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
     relabel_configs:
-      - action: labelmap
-        regex: __meta_kubernetes_node_label_(.+)
-      - target_label: __address__
-        replacement: kubernetes.default.svc:443
-      - source_labels: [__meta_kubernetes_node_name]
-        regex: (.+)
-        target_label: __metrics_path__
-        replacement: /api/v1/nodes/${1}/proxy/metrics
+    - action: labelmap
+      regex: __meta_kubernetes_node_label_(.+)
+    - target_label: __address__
+      replacement: kubernetes.default.svc:443
+    - source_labels: [__meta_kubernetes_node_name]
+      regex: (.+)
+      target_label: __metrics_path__
+      replacement: /api/v1/nodes/${1}/proxy/metrics
 
   - job_name: 'kubernetes-pods'
     kubernetes_sd_configs:
-      - role: pod
+    - role: pod
     relabel_configs:
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-        action: keep
-        regex: true
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-        action: replace
-        target_label: __metrics_path__
-        regex: (.+)
-      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-        action: replace
-        regex: ([^:]+)(?::\d+)?;(\d+)
-        replacement: $1:$2
-        target_label: __address__
-      - action: labelmap
-        regex: __meta_kubernetes_pod_label_(.+)
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        target_label: kubernetes_namespace
-      - source_labels: [__meta_kubernetes_pod_name]
-        action: replace
-        target_label: kubernetes_pod_name
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+      action: keep
+      regex: true
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+      action: replace
+      target_label: __metrics_path__
+      regex: (.+)
+    - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+      action: replace
+      regex: ([^:]+)(?::\d+)?;(\d+)
+      replacement: $1:$2
+      target_label: __address__
+    - action: labelmap
+      regex: __meta_kubernetes_pod_label_(.+)
+    - source_labels: [__meta_kubernetes_namespace]
+      action: replace
+      target_label: kubernetes_namespace
+    - source_labels: [__meta_kubernetes_pod_name]
+      action: replace
+      target_label: kubernetes_pod_name
+
+# Storage configuration
+storage:
+  tsdb:
+    path: /prometheus/
+    retention.time: 30d
+    retention.size: 50GB
+
+# Remote write configuration (for long-term storage)
+remote_write:
+  - url: "http://victoriametrics:8428/api/v1/write"
+    queue_config:
+      max_samples_per_send: 10000
+      batch_send_deadline: 5s
+      max_shards: 200
+
+# Remote read configuration
+remote_read:
+  - url: "http://victoriametrics:8428/api/v1/read"

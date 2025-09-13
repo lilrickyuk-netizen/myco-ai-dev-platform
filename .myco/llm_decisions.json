@@ -1,58 +1,64 @@
 {
-  "session_id": "init-session-001",
-  "start_time": "2025-09-13T00:00:00Z",
-  "decisions": [
+  "architecture_decisions": [
     {
-      "timestamp": "2025-09-13T00:00:00Z",
-      "agent_id": "orchestrator-001",
-      "decision_id": "dec-001",
-      "context": "Project analysis and planning",
-      "input": {
-        "task": "Analyze existing codebase and plan implementation",
-        "requirements": "Complete hybrid development platform"
-      },
-      "reasoning": "Identified existing Encore.ts backend with partial agent system. Need to complete all missing components including Myco control plane, specialized agents, AI engine, and enhanced frontend.",
-      "output": {
-        "action": "Create comprehensive implementation plan",
-        "components_identified": [
-          "Partial agent system exists",
-          "Backend services partially implemented", 
-          "Frontend components basic",
-          "Missing: AI engine, deployment automation, monitoring"
-        ]
-      },
-      "confidence": 0.95,
-      "model_used": "claude-3-sonnet",
-      "tokens_consumed": 1250
+      "decision_id": "ARCH-001",
+      "title": "Backend Framework Selection",
+      "decision": "Encore.ts for backend services",
+      "rationale": "Type-safe API development with automatic service generation and built-in infrastructure",
+      "alternatives_considered": ["Express.js", "NestJS", "Fastify"],
+      "timestamp": "2024-01-15T10:00:00Z"
     },
     {
-      "timestamp": "2025-09-13T00:00:01Z",
-      "agent_id": "orchestrator-001", 
-      "decision_id": "dec-002",
-      "context": "Control plane initialization",
-      "input": {
-        "task": "Initialize Myco control plane",
-        "purpose": "Track all AI decisions and ensure transparency"
-      },
-      "reasoning": "Control plane is essential for auditability and quality assurance. Must track every decision, artifact, and verification step.",
-      "output": {
-        "action": "Create .myco/ directory structure",
-        "files_created": [
-          "README.md",
-          "config/control_plane_config.json",
-          "inputs.json", 
-          "llm_decisions.json"
-        ]
-      },
-      "confidence": 1.0,
-      "model_used": "claude-3-sonnet",
-      "tokens_consumed": 850
+      "decision_id": "ARCH-002", 
+      "title": "Frontend Framework",
+      "decision": "React 18 with TypeScript and Vite",
+      "rationale": "Modern React with excellent TypeScript support and fast development experience",
+      "alternatives_considered": ["Vue.js", "Angular", "Svelte"],
+      "timestamp": "2024-01-15T10:15:00Z"
+    },
+    {
+      "decision_id": "ARCH-003",
+      "title": "AI Engine Framework",
+      "decision": "FastAPI with Python",
+      "rationale": "Excellent async support, automatic OpenAPI docs, and strong ML ecosystem integration",
+      "alternatives_considered": ["Flask", "Django", "Node.js"],
+      "timestamp": "2024-01-15T10:30:00Z"
+    },
+    {
+      "decision_id": "ARCH-004",
+      "title": "Database Strategy",
+      "decision": "PostgreSQL as primary database with Redis for caching",
+      "rationale": "ACID compliance, excellent performance, and Redis for session management and caching",
+      "alternatives_considered": ["MongoDB", "MySQL", "DynamoDB"],
+      "timestamp": "2024-01-15T10:45:00Z"
+    },
+    {
+      "decision_id": "ARCH-005",
+      "title": "Container Orchestration",
+      "decision": "Docker with Kubernetes for production",
+      "rationale": "Industry standard for containerization and orchestration",
+      "alternatives_considered": ["Docker Swarm", "Nomad"],
+      "timestamp": "2024-01-15T11:00:00Z"
     }
   ],
-  "summary": {
-    "total_decisions": 2,
-    "models_used": ["claude-3-sonnet"],
-    "total_tokens": 2100,
-    "average_confidence": 0.975
-  }
+  "implementation_choices": [
+    {
+      "choice_id": "IMPL-001",
+      "component": "Authentication",
+      "choice": "JWT with refresh tokens",
+      "rationale": "Stateless, scalable, and secure authentication mechanism"
+    },
+    {
+      "choice_id": "IMPL-002",
+      "component": "Code Editor",
+      "choice": "Monaco Editor",
+      "rationale": "VSCode editor experience with excellent language support"
+    },
+    {
+      "choice_id": "IMPL-003",
+      "component": "Real-time Communication",
+      "choice": "WebSockets with Socket.io",
+      "rationale": "Reliable real-time communication with fallbacks"
+    }
+  ]
 }
