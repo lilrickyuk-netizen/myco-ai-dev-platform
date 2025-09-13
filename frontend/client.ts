@@ -482,8 +482,10 @@ export namespace files {
         /**
          * Deletes a file or directory.
          */
-        public async deleteFile(params: { id: string }): Promise<void> {
-            await this.baseClient.callTypedAPI(`/files/file/${encodeURIComponent(params.id)}`, {method: "DELETE", body: undefined})
+        public async deleteFile(params: { id: string }): Promise<ResponseType<typeof api_files_delete_deleteFile>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/files/${encodeURIComponent(params.id)}`, {method: "DELETE", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_files_delete_deleteFile>
         }
 
         /**
@@ -557,10 +559,12 @@ export namespace projects {
         }
 
         /**
-         * Deletes a project.
+         * Deletes a project and all associated files.
          */
-        public async deleteProject(params: { id: string }): Promise<void> {
-            await this.baseClient.callTypedAPI(`/projects/${encodeURIComponent(params.id)}`, {method: "DELETE", body: undefined})
+        public async deleteProject(params: { id: string }): Promise<ResponseType<typeof api_projects_delete_deleteProject>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/projects/${encodeURIComponent(params.id)}`, {method: "DELETE", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_projects_delete_deleteProject>
         }
 
         /**

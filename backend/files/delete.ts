@@ -7,43 +7,59 @@ export interface DeleteFileParams {
   id: string;
 }
 
+export interface DeleteFileResponse {
+  success: boolean;
+}
+
 // Deletes a file or directory.
-export const deleteFile = api<DeleteFileParams, void>(
-  { auth: true, expose: true, method: "DELETE", path: "/files/file/:id" },
+export const deleteFile = api<DeleteFileParams, DeleteFileResponse>(
+  { auth: true, expose: true, method: "DELETE", path: "/files/:id" },
   async ({ id }) => {
     const auth = getAuthData()!;
 
-    // Get file info and verify ownership
+    // Get file info and verify access
     const file = await filesDB.queryRow`
-      SELECT project_id, is_directory FROM files WHERE id = ${id}
+      SELECT f.id, f.project_id, f.is_directory
+      FROM files f
+      JOIN projects p ON f.project_id = p.id
+      WHERE f.id = ${id} AND p.user_id = ${auth.userID}
     `;
 
     if (!file) {
       throw APIError.notFound("File not found");
     }
 
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${file.project_id} AND user_id = ${auth.userID}
+    // If it's a directory, delete all children recursively
+    if (file.is_directory) {
+      // Delete all child files and their versions
+      await filesDB.exec`
+        DELETE FROM file_versions 
+        WHERE file_id IN (
+          SELECT id FROM files 
+          WHERE parent_id = ${id} OR path LIKE (
+            SELECT path || '%' FROM files WHERE id = ${id}
+          )
+        )
+      `;
+      
+      await filesDB.exec`
+        DELETE FROM files 
+        WHERE parent_id = ${id} OR path LIKE (
+          SELECT path || '%' FROM files WHERE id = ${id}
+        )
+      `;
+    } else {
+      // Delete file versions first
+      await filesDB.exec`
+        DELETE FROM file_versions WHERE file_id = ${id}
+      `;
+    }
+
+    // Delete the file itself
+    await filesDB.exec`
+      DELETE FROM files WHERE id = ${id}
     `;
 
-    if (!project) {
-      throw APIError.notFound("Project not found");
-    }
-
-    // If it's a directory, check if it has children
-    if (file.is_directory) {
-      const children = await filesDB.queryRow`
-        SELECT COUNT(*) as count FROM files WHERE parent_id = ${id}
-      `;
-
-      if (children && children.count > 0) {
-        throw APIError.failedPrecondition("Directory must be empty before deletion");
-      }
-    }
-
-    // Delete the file (versions will be cascade deleted)
-    await filesDB.exec`DELETE FROM files WHERE id = ${id}`;
+    return { success: true };
   }
 );

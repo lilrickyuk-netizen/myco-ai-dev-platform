@@ -63,3 +63,23 @@ CREATE INDEX idx_agent_logs_task_id ON agent_logs(task_id);
 CREATE INDEX idx_agent_logs_timestamp ON agent_logs(timestamp);
 CREATE INDEX idx_agent_artifacts_session_id ON agent_artifacts(session_id);
 CREATE INDEX idx_agent_artifacts_task_id ON agent_artifacts(task_id);
+
+-- Orchestrations table for project generation tracking
+CREATE TABLE orchestrations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID NOT NULL,
+  user_id TEXT NOT NULL,
+  requirements JSONB NOT NULL,
+  tech_stack JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'initializing',
+  status_message TEXT,
+  progress_percentage INTEGER DEFAULT 0,
+  current_phase TEXT,
+  estimated_completion TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_orchestrations_project_id ON orchestrations(project_id);
+CREATE INDEX idx_orchestrations_user_id ON orchestrations(user_id);
+CREATE INDEX idx_orchestrations_status ON orchestrations(status);

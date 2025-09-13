@@ -41,23 +41,24 @@ interface Message {
   };
 }
 
+interface File {
+  id: string;
+  name: string;
+  path: string;
+  content?: string;
+  isDirectory: boolean;
+}
+
 interface AIAssistantProps {
-  projectId?: string;
-  currentFile?: {
-    name: string;
-    path: string;
-    content: string;
-    language?: string;
-  };
+  projectId: string;
+  activeFile?: File | null;
   onCodeInsert?: (code: string) => void;
-  onFileCreate?: (filename: string, content: string) => void;
 }
 
 const AIAssistant: React.FC<AIAssistantProps> = ({
   projectId,
-  currentFile,
-  onCodeInsert,
-  onFileCreate
+  activeFile,
+  onCodeInsert
 }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -130,8 +131,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
 
     try {
       // Prepare context
-      const context = currentFile ? 
-        `Current file: ${currentFile.name}\nLanguage: ${currentFile.language}\nContent:\n${currentFile.content}` : 
+      const context = activeFile ? 
+        `Current file: ${activeFile.name}\nPath: ${activeFile.path}\nContent:\n${activeFile.content || ''}` : 
         undefined;
 
       // Call AI service
@@ -144,8 +145,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       // Add AI response
       addMessage(response.content, 'assistant', {
         code: response.content.includes('```'),
-        language: currentFile?.language,
-        fileContext: currentFile?.name,
+        fileContext: activeFile?.name,
       });
 
     } catch (error) {
@@ -166,7 +166,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
     setInputMessage(prompt);
   };
 
-  const handleCodeAction = async (action: 'copy' | 'insert' | 'create', code: string, filename?: string) => {
+  const handleCodeAction = async (action: 'copy' | 'insert', code: string) => {
     switch (action) {
       case 'copy':
         await navigator.clipboard.writeText(code);
@@ -181,15 +181,6 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
           toast({
             title: 'Inserted!',
             description: 'Code inserted into editor',
-          });
-        }
-        break;
-      case 'create':
-        if (onFileCreate && filename) {
-          onFileCreate(filename, code);
-          toast({
-            title: 'Created!',
-            description: `File ${filename} created`,
           });
         }
         break;
@@ -425,9 +416,9 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
           </Button>
         </div>
         
-        {currentFile && (
+        {activeFile && (
           <div className="mt-2 text-xs text-gray-500">
-            Context: {currentFile.name} ({currentFile.language})
+            Context: {activeFile.name}
           </div>
         )}
       </div>
