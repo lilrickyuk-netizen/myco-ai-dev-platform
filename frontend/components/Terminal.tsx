@@ -9,7 +9,7 @@ interface TerminalProps {
   projectId: string;
 }
 
-export function Terminal({ projectId }: TerminalProps) {
+function Terminal({ projectId }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState('');
   const [output, setOutput] = useState<string[]>([]);
@@ -282,3 +282,5 @@ export function Terminal({ projectId }: TerminalProps) {
     </Card>
   );
 }
+
+export default Terminal;

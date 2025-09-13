@@ -11,7 +11,7 @@ interface CodeEditorProps {
   onSave: () => void;
 }
 
-export function CodeEditor({ file, content, onChange, onSave }: CodeEditorProps) {
+function CodeEditor({ file, content, onChange, onSave }: CodeEditorProps) {
   const editorRef = useRef<any>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -189,3 +189,5 @@ export function CodeEditor({ file, content, onChange, onSave }: CodeEditorProps)
     </div>
   );
 }
+
+export default CodeEditor;

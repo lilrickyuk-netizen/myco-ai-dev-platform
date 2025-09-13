@@ -11,12 +11,14 @@ import {
   ThumbsUp,
   ThumbsDown,
   Sparkles,
-  User
+  User,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -68,11 +70,12 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       timestamp: new Date(),
     }
   ]);
-  const [inputMessage, setInputMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
   const [selectedPrompt, setSelectedPrompt] = useState<string>('');
   
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -126,8 +129,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
 
     // Add user message
     addMessage(message, 'user');
-    setInputMessage('');
-    setIsLoading(true);
+    setInput('');
+    setLoading(true);
 
     try {
       // Prepare context
@@ -158,13 +161,24 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
         variant: 'destructive',
       });
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   const handleQuickPrompt = (prompt: string) => {
-    setInputMessage(prompt);
+    setInput(prompt);
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (input.trim()) {
+        sendMessage(input);
+      }
+    }
+  };
+
+  const currentFile = activeFile;
 
   const handleCodeAction = async (action: 'copy' | 'insert', code: string) => {
     switch (action) {
@@ -426,290 +440,4 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
   );
 };
 
-export { AIAssistant };
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: "Hello! I'm your AI coding assistant. I can help you write code, debug issues, explain concepts, and provide suggestions. What would you like to work on?",
-      timestamp: new Date(),
-      type: "text"
-    }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const backend = useBackend();
-  const { toast } = useToast();
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input.trim(),
-      timestamp: new Date(),
-      type: "text"
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInput("");
-    setLoading(true);
-
-    try {
-      const context = {
-        projectId,
-        currentFile: currentFile ? {
-          path: currentFile.path,
-          name: currentFile.name,
-          type: currentFile.type
-        } : null,
-        recentMessages: messages.slice(-5).map(m => ({
-          role: m.role,
-          content: m.content
-        }))
-      };
-
-      const response = await backend.ai.chat({
-        message: userMessage.content,
-        context
-      });
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: response.message,
-        timestamp: new Date(),
-        type: response.type || "text"
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-
-      // If the response contains code and user wants to apply it
-      if (response.type === "code" && response.code) {
-        // Auto-apply code if it's a direct code generation request
-        if (userMessage.content.toLowerCase().includes("generate") || 
-            userMessage.content.toLowerCase().includes("write") ||
-            userMessage.content.toLowerCase().includes("create")) {
-          onCodeGenerated(response.code);
-        }
-      }
-
-    } catch (err) {
-      console.error("Failed to send message:", err);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: "I apologize, but I encountered an error while processing your request. Please try again.",
-        timestamp: new Date(),
-        type: "text"
-      };
-      setMessages(prev => [...prev, errorMessage]);
-      
-      toast({
-        title: "Error",
-        description: "Failed to get AI response. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  const insertCodeSuggestion = (code: string) => {
-    onCodeGenerated(code);
-    toast({
-      title: "Code Applied",
-      description: "The code has been inserted into the editor."
-    });
-  };
-
-  const quickActions = [
-    {
-      icon: Code,
-      label: "Explain this code",
-      prompt: "Explain the code in the current file"
-    },
-    {
-      icon: Lightbulb,
-      label: "Suggest improvements",
-      prompt: "Suggest improvements for the code in the current file"
-    },
-    {
-      icon: Bot,
-      label: "Debug help",
-      prompt: "Help me debug issues in this code"
-    }
-  ];
-
-  const handleQuickAction = (prompt: string) => {
-    if (!currentFile) {
-      toast({
-        title: "No File Selected",
-        description: "Please select a file to use this action.",
-        variant: "destructive"
-      });
-      return;
-    }
-    setInput(prompt);
-  };
-
-  return (
-    <div className="h-full flex flex-col bg-card">
-      {/* Header */}
-      <CardHeader className="border-b">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <Bot className="h-4 w-4" />
-          AI Assistant
-        </CardTitle>
-      </CardHeader>
-
-      {/* Quick Actions */}
-      {currentFile && (
-        <div className="p-3 border-b">
-          <p className="text-xs text-muted-foreground mb-2">Quick Actions</p>
-          <div className="grid grid-cols-1 gap-1">
-            {quickActions.map((action, index) => (
-              <Button
-                key={index}
-                variant="ghost"
-                size="sm"
-                onClick={() => handleQuickAction(action.prompt)}
-                className="justify-start gap-2 h-8"
-              >
-                <action.icon className="h-3 w-3" />
-                <span className="text-xs">{action.label}</span>
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Messages */}
-      <CardContent className="flex-1 p-0">
-        <ScrollArea className="h-full">
-          <div className="p-4 space-y-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex gap-3 ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                {message.role === "assistant" && (
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                      <Bot className="h-4 w-4 text-primary-foreground" />
-                    </div>
-                  </div>
-                )}
-                
-                <div
-                  className={`max-w-[80%] rounded-lg p-3 ${
-                    message.role === "user"
-                      ? "bg-primary text-primary-foreground ml-auto"
-                      : "bg-muted"
-                  }`}
-                >
-                  {message.type === "code" ? (
-                    <div className="space-y-2">
-                      <pre className="text-sm overflow-x-auto bg-background p-2 rounded border">
-                        <code>{message.content}</code>
-                      </pre>
-                      {message.role === "assistant" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => insertCodeSuggestion(message.content)}
-                          className="gap-2"
-                        >
-                          <Code className="h-3 w-3" />
-                          Apply Code
-                        </Button>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                  )}
-                  
-                  <p className="text-xs opacity-70 mt-2">
-                    {message.timestamp.toLocaleTimeString()}
-                  </p>
-                </div>
-
-                {message.role === "user" && (
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                      <User className="h-4 w-4" />
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            
-            {loading && (
-              <div className="flex gap-3 justify-start">
-                <div className="flex-shrink-0">
-                  <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                    <Bot className="h-4 w-4 text-primary-foreground" />
-                  </div>
-                </div>
-                <div className="bg-muted rounded-lg p-3">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm">Thinking...</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            <div ref={messagesEndRef} />
-          </div>
-        </ScrollArea>
-      </CardContent>
-
-      {/* Input */}
-      <div className="p-4 border-t">
-        <div className="flex gap-2">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask me anything about your code..."
-            disabled={loading}
-            className="flex-1"
-          />
-          <Button
-            onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            size="sm"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
-        
-        {currentFile && (
-          <p className="text-xs text-muted-foreground mt-2">
-            Context: {currentFile.name}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
+export default AIAssistant;
