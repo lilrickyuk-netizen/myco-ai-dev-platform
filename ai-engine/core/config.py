@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     
     # Vector Store settings
     PINECONE_API_KEY: Optional[str] = Field(default=None, env="PINECONE_API_KEY")
-    PINECONE_ENVIRONMENT: Optional[str] = Field(default=None, env="PINECONE_ENVIRONMENT")
+    PINECONE_ENVIRONMENT: str = Field(default="us-west1-gcp", env="PINECONE_ENVIRONMENT")
+    PINECONE_INDEX_NAME: str = Field(default="myco-vectors", env="PINECONE_INDEX_NAME")
     WEAVIATE_URL: str = Field(default="http://localhost:8080", env="WEAVIATE_URL")
     CHROMA_PERSIST_DIRECTORY: str = Field(default="./data/chroma", env="CHROMA_PERSIST_DIRECTORY")
     
@@ -62,9 +63,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW: int = Field(default=60, env="RATE_LIMIT_WINDOW")  # seconds
     
     # Authentication
-    JWT_SECRET: str = Field(default="your-secret-key", env="JWT_SECRET")
+    JWT_SECRET_KEY: str = Field(default="your-super-secret-jwt-key-change-in-production", env="JWT_SECRET_KEY")
     JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
-    JWT_EXPIRE_MINUTES: int = Field(default=1440, env="JWT_EXPIRE_MINUTES")  # 24 hours
+    JWT_EXPIRATION_HOURS: int = Field(default=24, env="JWT_EXPIRATION_HOURS")
     
     # Generation settings
     DEFAULT_MODEL: str = Field(default="gpt-4", env="DEFAULT_MODEL")
@@ -90,17 +91,7 @@ class Settings(BaseSettings):
     
     # Development settings
     ENABLE_MOCK_RESPONSES: bool = Field(default=False, env="ENABLE_MOCK_RESPONSES")
-    
-    # Real API Keys
-    OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
-    ANTHROPIC_API_KEY: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
-    GOOGLE_API_KEY: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
-    COHERE_API_KEY: Optional[str] = Field(default=None, env="COHERE_API_KEY")
-    
-    # Vector Store Configuration
-    PINECONE_API_KEY: Optional[str] = Field(default=None, env="PINECONE_API_KEY")
-    PINECONE_ENVIRONMENT: str = Field(default="us-west1-gcp", env="PINECONE_ENVIRONMENT")
-    PINECONE_INDEX_NAME: str = Field(default="myco-vectors", env="PINECONE_INDEX_NAME")
+    MOCK_RESPONSE_DELAY: float = Field(default=0.5, env="MOCK_RESPONSE_DELAY")
     
     # Cloud Provider API Keys
     AWS_ACCESS_KEY_ID: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
@@ -116,17 +107,11 @@ class Settings(BaseSettings):
     AZURE_CLIENT_SECRET: Optional[str] = Field(default=None, env="AZURE_CLIENT_SECRET")
     AZURE_TENANT_ID: Optional[str] = Field(default=None, env="AZURE_TENANT_ID")
     
-    # Authentication Configuration
-    JWT_SECRET_KEY: str = Field(default="your-super-secret-jwt-key-change-in-production", env="JWT_SECRET_KEY")
-    JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
-    JWT_EXPIRATION_HOURS: int = Field(default=24, env="JWT_EXPIRATION_HOURS")
-    
     # OAuth Configuration
     GITHUB_CLIENT_ID: Optional[str] = Field(default=None, env="GITHUB_CLIENT_ID")
     GITHUB_CLIENT_SECRET: Optional[str] = Field(default=None, env="GITHUB_CLIENT_SECRET")
     GOOGLE_OAUTH_CLIENT_ID: Optional[str] = Field(default=None, env="GOOGLE_OAUTH_CLIENT_ID")
     GOOGLE_OAUTH_CLIENT_SECRET: Optional[str] = Field(default=None, env="GOOGLE_OAUTH_CLIENT_SECRET")
-    MOCK_RESPONSE_DELAY: float = Field(default=0.5, env="MOCK_RESPONSE_DELAY")
     
     class Config:
         env_file = ".env"

@@ -83,3 +83,15 @@ CREATE TABLE orchestrations (
 CREATE INDEX idx_orchestrations_project_id ON orchestrations(project_id);
 CREATE INDEX idx_orchestrations_user_id ON orchestrations(user_id);
 CREATE INDEX idx_orchestrations_status ON orchestrations(status);
+
+-- Agent task results table for storing task execution results
+CREATE TABLE agent_task_results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  session_id UUID NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+  task_name TEXT NOT NULL,
+  result JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_agent_task_results_session_id ON agent_task_results(session_id);
+CREATE INDEX idx_agent_task_results_task_name ON agent_task_results(task_name);
