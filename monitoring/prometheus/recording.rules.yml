@@ -1,0 +1,130 @@
+# Recording Rules for Hybrid Development Platform
+groups:
+  - name: hybrid-dev-platform-recording
+    interval: 30s
+    rules:
+      # HTTP Request Rate
+      - record: http_requests_per_second
+        expr: rate(http_requests_total[5m])
+
+      # HTTP Error Rate
+      - record: http_error_rate
+        expr: rate(http_requests_total{status=~"4.."}[5m]) + rate(http_requests_total{status=~"5.."}[5m])
+
+      # HTTP Success Rate
+      - record: http_success_rate
+        expr: rate(http_requests_total{status=~"2.."}[5m])
+
+      # API Response Times
+      - record: api_response_time_95th
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+      - record: api_response_time_99th
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+
+      - record: api_response_time_50th
+        expr: histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))
+
+      # System Resource Utilization
+      - record: cpu_utilization_percent
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+      - record: memory_utilization_percent
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+      - record: disk_utilization_percent
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100
+
+      # Application-specific metrics
+      - record: ai_engine_requests_per_second
+        expr: rate(ai_engine_requests_total[5m])
+
+      - record: ai_engine_processing_time_avg
+        expr: rate(ai_engine_processing_time_seconds_sum[5m]) / rate(ai_engine_processing_time_seconds_count[5m])
+
+      - record: execution_engine_containers_active
+        expr: execution_engine_containers_total{status="running"}
+
+      - record: deployment_success_rate
+        expr: rate(deployment_successes_total[10m]) / (rate(deployment_successes_total[10m]) + rate(deployment_failures_total[10m]))
+
+      # Database Performance
+      - record: db_queries_per_second
+        expr: rate(pg_stat_statements_calls[5m])
+
+      - record: db_query_time_avg
+        expr: rate(pg_stat_statements_total_time_ms[5m]) / rate(pg_stat_statements_calls[5m])
+
+      - record: db_connections_active
+        expr: pg_stat_activity_count
+
+      # Redis Performance
+      - record: redis_operations_per_second
+        expr: rate(redis_commands_processed_total[5m])
+
+      - record: redis_memory_usage_percent
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100
+
+      # Container Metrics
+      - record: container_cpu_usage_percent
+        expr: rate(container_cpu_usage_seconds_total[5m]) * 100
+
+      - record: container_memory_usage_percent
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100
+
+      # Business Metrics
+      - record: active_users_current
+        expr: sum(user_sessions_active)
+
+      - record: projects_created_per_hour
+        expr: rate(project_creation_successes_total[1h]) * 3600
+
+      - record: code_executions_per_minute
+        expr: rate(code_executions_total[1m]) * 60
+
+      - record: deployments_per_hour
+        expr: rate(deployment_successes_total[1h]) * 3600
+
+      # Platform Health Score
+      - record: platform_health_score
+        expr: |
+          (
+            (up * 10) +
+            (clamp_max(100 - http_error_rate * 100, 100) / 10) +
+            (clamp_max(100 - cpu_utilization_percent, 100) / 10) +
+            (clamp_max(100 - memory_utilization_percent, 100) / 10) +
+            (clamp_max(deployment_success_rate * 100, 100) / 10)
+          ) / 5
+
+  - name: aggregated-metrics
+    interval: 1m
+    rules:
+      # Cluster-wide aggregations
+      - record: cluster_cpu_usage_avg
+        expr: avg(cpu_utilization_percent)
+
+      - record: cluster_memory_usage_avg
+        expr: avg(memory_utilization_percent)
+
+      - record: cluster_requests_per_second_total
+        expr: sum(http_requests_per_second)
+
+      - record: cluster_error_rate_avg
+        expr: avg(http_error_rate)
+
+      # Service-level aggregations
+      - record: service_availability_percent
+        expr: avg by (job) (up) * 100
+
+      - record: service_response_time_p95
+        expr: histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m])))
+
+      - record: service_throughput
+        expr: sum by (job) (rate(http_requests_total[5m]))
+
+      # Cross-service dependency health
+      - record: dependency_health_score
+        expr: |
+          min by (service) (
+            avg by (service) (up{job=~"postgres|redis|mongodb|elasticsearch"})
+          ) * 100

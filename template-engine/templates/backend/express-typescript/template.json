@@ -1,0 +1,257 @@
+{
+  "name": "Express TypeScript API",
+  "description": "Robust Express.js REST API with TypeScript, authentication, and database integration",
+  "category": "backend",
+  "type": "api",
+  "tags": ["express", "typescript", "rest", "api", "node"],
+  "tech_stack": ["express", "typescript", "postgresql", "redis", "jwt", "bcrypt"],
+  "features": [
+    "TypeScript support",
+    "JWT authentication",
+    "Database integration (PostgreSQL)",
+    "Redis caching",
+    "Input validation",
+    "Error handling",
+    "API documentation (OpenAPI)",
+    "Testing setup",
+    "Docker support",
+    "Rate limiting",
+    "CORS configuration",
+    "Security middleware"
+  ],
+  "requirements": {
+    "node_version": ">=18.0.0",
+    "npm_version": ">=9.0.0",
+    "postgresql": ">=13.0.0",
+    "redis": ">=6.0.0"
+  },
+  "structure": {
+    "src/": {
+      "controllers/": {},
+      "middleware/": {},
+      "models/": {},
+      "routes/": {},
+      "services/": {},
+      "utils/": {},
+      "types/": {},
+      "config/": {},
+      "validators/": {},
+      "database/": {
+        "migrations/": {},
+        "seeds/": {}
+      }
+    },
+    "tests/": {
+      "unit/": {},
+      "integration/": {},
+      "fixtures/": {}
+    },
+    "docs/": {},
+    "scripts/": {}
+  },
+  "files": {
+    "package.json": {
+      "template": "express-typescript/package.json.hbs",
+      "variables": ["project_name", "description", "author"]
+    },
+    "tsconfig.json": {
+      "template": "express-typescript/tsconfig.json.hbs"
+    },
+    "nodemon.json": {
+      "template": "express-typescript/nodemon.json.hbs"
+    },
+    ".env.example": {
+      "template": "express-typescript/.env.example.hbs"
+    },
+    "src/app.ts": {
+      "template": "express-typescript/src/app.ts.hbs"
+    },
+    "src/server.ts": {
+      "template": "express-typescript/src/server.ts.hbs"
+    },
+    "src/config/database.ts": {
+      "template": "express-typescript/src/config/database.ts.hbs"
+    },
+    "src/config/redis.ts": {
+      "template": "express-typescript/src/config/redis.ts.hbs"
+    },
+    "src/middleware/auth.ts": {
+      "template": "express-typescript/src/middleware/auth.ts.hbs"
+    },
+    "src/middleware/errorHandler.ts": {
+      "template": "express-typescript/src/middleware/errorHandler.ts.hbs"
+    },
+    "src/middleware/validation.ts": {
+      "template": "express-typescript/src/middleware/validation.ts.hbs"
+    },
+    "src/routes/auth.ts": {
+      "template": "express-typescript/src/routes/auth.ts.hbs"
+    },
+    "src/routes/users.ts": {
+      "template": "express-typescript/src/routes/users.ts.hbs"
+    },
+    "src/controllers/authController.ts": {
+      "template": "express-typescript/src/controllers/authController.ts.hbs"
+    },
+    "src/controllers/userController.ts": {
+      "template": "express-typescript/src/controllers/userController.ts.hbs"
+    },
+    "src/models/User.ts": {
+      "template": "express-typescript/src/models/User.ts.hbs"
+    },
+    "src/services/authService.ts": {
+      "template": "express-typescript/src/services/authService.ts.hbs"
+    },
+    "src/services/userService.ts": {
+      "template": "express-typescript/src/services/userService.ts.hbs"
+    },
+    "src/utils/jwt.ts": {
+      "template": "express-typescript/src/utils/jwt.ts.hbs"
+    },
+    "src/utils/bcrypt.ts": {
+      "template": "express-typescript/src/utils/bcrypt.ts.hbs"
+    },
+    "src/validators/authValidator.ts": {
+      "template": "express-typescript/src/validators/authValidator.ts.hbs"
+    },
+    "README.md": {
+      "template": "express-typescript/README.md.hbs",
+      "variables": ["project_name", "description", "author"]
+    },
+    ".gitignore": {
+      "template": "common/.gitignore.hbs"
+    },
+    "Dockerfile": {
+      "template": "express-typescript/Dockerfile.hbs"
+    },
+    "docker-compose.yml": {
+      "template": "express-typescript/docker-compose.yml.hbs",
+      "variables": ["project_name"]
+    },
+    "jest.config.js": {
+      "template": "express-typescript/jest.config.js.hbs"
+    }
+  },
+  "scripts": {
+    "dev": "nodemon",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "type-check": "tsc --noEmit",
+    "migrate": "knex migrate:latest",
+    "migrate:rollback": "knex migrate:rollback",
+    "seed": "knex seed:run",
+    "docker:build": "docker build -t {{project_name}} .",
+    "docker:run": "docker-compose up"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^6.1.5",
+    "morgan": "^1.10.0",
+    "compression": "^1.7.4",
+    "express-rate-limit": "^6.7.0",
+    "dotenv": "^16.0.3",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.0",
+    "joi": "^17.9.1",
+    "winston": "^3.8.2",
+    "knex": "^2.4.2",
+    "pg": "^8.10.0",
+    "redis": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.11",
+    "@types/express": "^4.17.17",
+    "@types/cors": "^2.8.13",
+    "@types/morgan": "^1.9.4",
+    "@types/compression": "^1.7.2",
+    "@types/bcryptjs": "^2.4.2",
+    "@types/jsonwebtoken": "^9.0.1",
+    "@types/pg": "^8.6.6",
+    "@typescript-eslint/eslint-plugin": "^5.57.1",
+    "@typescript-eslint/parser": "^5.57.1",
+    "eslint": "^8.38.0",
+    "prettier": "^2.8.8",
+    "typescript": "^5.0.4",
+    "nodemon": "^2.0.22",
+    "jest": "^29.5.0",
+    "@types/jest": "^29.5.1",
+    "ts-jest": "^29.1.0",
+    "supertest": "^6.3.3",
+    "@types/supertest": "^2.0.12"
+  },
+  "deployment": {
+    "build_command": "npm run build",
+    "start_command": "npm start",
+    "node_version": "18",
+    "environment_variables": {
+      "NODE_ENV": "production",
+      "DATABASE_URL": "required",
+      "REDIS_URL": "required",
+      "JWT_SECRET": "required"
+    },
+    "providers": {
+      "heroku": {
+        "buildpacks": ["heroku/nodejs"],
+        "addons": ["heroku-postgresql", "heroku-redis"]
+      },
+      "aws": {
+        "service": "ecs",
+        "database": "rds-postgresql",
+        "cache": "elasticache-redis"
+      },
+      "digitalocean": {
+        "service": "app-platform",
+        "database": "managed-database",
+        "cache": "managed-redis"
+      }
+    }
+  },
+  "customization": {
+    "database": {
+      "type": "select",
+      "options": ["postgresql", "mysql", "mongodb", "sqlite"],
+      "default": "postgresql"
+    },
+    "orm": {
+      "type": "select",
+      "options": ["knex", "typeorm", "prisma", "sequelize"],
+      "default": "knex"
+    },
+    "authentication": {
+      "type": "select",
+      "options": ["jwt", "passport", "auth0", "firebase"],
+      "default": "jwt"
+    },
+    "validation": {
+      "type": "select",
+      "options": ["joi", "yup", "zod", "class-validator"],
+      "default": "joi"
+    },
+    "testing": {
+      "type": "select",
+      "options": ["jest", "mocha", "vitest"],
+      "default": "jest"
+    },
+    "documentation": {
+      "type": "select",
+      "options": ["swagger", "postman", "insomnia"],
+      "default": "swagger"
+    }
+  },
+  "post_generation": [
+    "npm install",
+    "npm run type-check",
+    "npm run lint",
+    "cp .env.example .env",
+    "git init",
+    "git add .",
+    "git commit -m \"Initial commit: Express TypeScript API\""
+  ]
+}

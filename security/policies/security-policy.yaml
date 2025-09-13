@@ -1,0 +1,327 @@
+# Security Policy Configuration for Hybrid Development Platform
+
+# CORS (Cross-Origin Resource Sharing) Policy
+cors_policy:
+  allowed_origins:
+    - "https://app.hybriddev.com"
+    - "https://*.hybriddev.com"
+    - "https://localhost:3000"
+    - "https://localhost:5173"
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - PATCH
+    - OPTIONS
+  allowed_headers:
+    - Content-Type
+    - Authorization
+    - X-Requested-With
+    - X-API-Key
+    - X-User-ID
+    - X-Session-ID
+  exposed_headers:
+    - X-RateLimit-Limit
+    - X-RateLimit-Remaining
+    - X-RateLimit-Reset
+  allow_credentials: true
+  max_age: 86400
+
+# Content Security Policy (CSP)
+csp_policy:
+  default_src: "'self'"
+  script_src: 
+    - "'self'"
+    - "'unsafe-inline'"
+    - "'unsafe-eval'"
+    - "https://unpkg.com"
+    - "https://cdn.jsdelivr.net"
+    - "https://cdnjs.cloudflare.com"
+  style_src:
+    - "'self'"
+    - "'unsafe-inline'"
+    - "https://fonts.googleapis.com"
+    - "https://unpkg.com"
+  font_src:
+    - "'self'"
+    - "https://fonts.gstatic.com"
+  img_src:
+    - "'self'"
+    - "data:"
+    - "https:"
+    - "blob:"
+  connect_src:
+    - "'self'"
+    - "https://api.hybriddev.com"
+    - "wss://api.hybriddev.com"
+    - "https://api.openai.com"
+    - "https://api.anthropic.com"
+  frame_src:
+    - "'self'"
+    - "https://www.youtube.com"
+  object_src: "'none'"
+  upgrade_insecure_requests: true
+
+# JWT Security Configuration
+jwt_security:
+  algorithm: "RS256"
+  issuer: "https://api.hybriddev.com"
+  audience: "hybriddev-platform"
+  access_token_ttl: 900  # 15 minutes
+  refresh_token_ttl: 604800  # 7 days
+  public_key_url: "https://api.hybriddev.com/.well-known/jwks.json"
+  private_key_rotation_days: 90
+  require_exp: true
+  require_iat: true
+  require_nbf: true
+  clock_skew_tolerance: 300  # 5 minutes
+
+# Rate Limiting Configuration
+rate_limiting:
+  # API endpoints
+  api:
+    default:
+      requests_per_minute: 100
+      burst_limit: 20
+    auth:
+      requests_per_minute: 10
+      burst_limit: 5
+    project_creation:
+      requests_per_minute: 5
+      burst_limit: 2
+    code_execution:
+      requests_per_minute: 50
+      burst_limit: 10
+    ai_requests:
+      requests_per_minute: 20
+      burst_limit: 5
+    deployment:
+      requests_per_minute: 10
+      burst_limit: 3
+  
+  # WebSocket connections
+  websocket:
+    connections_per_ip: 10
+    messages_per_minute: 1000
+  
+  # File operations
+  file_operations:
+    uploads_per_minute: 20
+    max_file_size_mb: 100
+    downloads_per_minute: 50
+
+# Input Validation Rules
+input_validation:
+  project_name:
+    min_length: 2
+    max_length: 100
+    pattern: "^[a-zA-Z0-9_-]+$"
+    sanitize: true
+  
+  file_path:
+    max_length: 500
+    forbidden_patterns:
+      - "../"
+      - "..\\"
+      - "/etc/"
+      - "/proc/"
+      - "/sys/"
+    allowed_extensions:
+      - ".js"
+      - ".ts"
+      - ".jsx"
+      - ".tsx"
+      - ".py"
+      - ".java"
+      - ".go"
+      - ".rs"
+      - ".php"
+      - ".rb"
+      - ".html"
+      - ".css"
+      - ".scss"
+      - ".json"
+      - ".yaml"
+      - ".yml"
+      - ".md"
+      - ".txt"
+  
+  code_content:
+    max_length: 1048576  # 1MB
+    sanitize_html: true
+    strip_dangerous_functions: true
+  
+  environment_variables:
+    max_count: 100
+    max_key_length: 100
+    max_value_length: 1000
+    forbidden_keys:
+      - "AWS_SECRET_ACCESS_KEY"
+      - "DATABASE_PASSWORD"
+      - "JWT_PRIVATE_KEY"
+
+# Password Policy
+password_policy:
+  min_length: 12
+  max_length: 128
+  require_uppercase: true
+  require_lowercase: true
+  require_numbers: true
+  require_special_chars: true
+  forbidden_patterns:
+    - "password"
+    - "123456"
+    - "qwerty"
+  max_failed_attempts: 5
+  lockout_duration_minutes: 30
+  password_history_count: 5
+  password_expiry_days: 90
+
+# Session Security
+session_security:
+  cookie_name: "hybriddev_session"
+  cookie_secure: true
+  cookie_httponly: true
+  cookie_samesite: "Strict"
+  session_timeout_minutes: 480  # 8 hours
+  idle_timeout_minutes: 60
+  concurrent_sessions_limit: 5
+  ip_binding: true
+  user_agent_binding: true
+
+# File Upload Security
+file_upload_security:
+  max_file_size_bytes: 104857600  # 100MB
+  allowed_mime_types:
+    - "text/plain"
+    - "text/javascript"
+    - "text/css"
+    - "application/json"
+    - "application/x-yaml"
+    - "image/png"
+    - "image/jpeg"
+    - "image/svg+xml"
+  virus_scan_enabled: true
+  quarantine_suspicious_files: true
+  scan_timeout_seconds: 30
+
+# API Key Security
+api_key_security:
+  key_length: 32
+  key_prefix: "hdev_"
+  rate_limit_multiplier: 5.0  # API keys get 5x normal rate limits
+  require_ip_whitelist: false
+  key_rotation_days: 365
+  usage_tracking: true
+  scope_restrictions: true
+
+# Encryption Configuration
+encryption:
+  data_at_rest:
+    algorithm: "AES-256-GCM"
+    key_rotation_days: 90
+    backup_encryption: true
+  
+  data_in_transit:
+    tls_version: "1.3"
+    cipher_suites:
+      - "TLS_AES_256_GCM_SHA384"
+      - "TLS_CHACHA20_POLY1305_SHA256"
+      - "TLS_AES_128_GCM_SHA256"
+    hsts_max_age: 31536000  # 1 year
+    hsts_include_subdomains: true
+    hsts_preload: true
+
+# Container Security
+container_security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  no_new_privileges: true
+  seccomp_profile: "runtime/default"
+  apparmor_profile: "runtime/default"
+  capabilities_drop:
+    - "ALL"
+  capabilities_add:
+    - "NET_BIND_SERVICE"
+  resource_limits:
+    memory: "1Gi"
+    cpu: "1000m"
+    ephemeral_storage: "2Gi"
+  network_policies:
+    ingress_isolation: true
+    egress_isolation: true
+    allowed_egress:
+      - "https://api.openai.com"
+      - "https://api.anthropic.com"
+      - "https://github.com"
+      - "https://registry.npmjs.org"
+
+# Audit Logging
+audit_logging:
+  enabled: true
+  log_level: "INFO"
+  retention_days: 365
+  encrypt_logs: true
+  events_to_log:
+    - authentication_attempts
+    - authorization_failures
+    - privileged_operations
+    - data_access
+    - configuration_changes
+    - security_events
+    - admin_actions
+    - api_key_usage
+    - file_operations
+    - code_execution
+    - deployment_actions
+  
+  sensitive_data_masking:
+    mask_passwords: true
+    mask_tokens: true
+    mask_secrets: true
+    mask_pii: true
+
+# Vulnerability Scanning
+vulnerability_scanning:
+  enabled: true
+  scan_frequency_hours: 24
+  scan_types:
+    - "dependency_check"
+    - "static_analysis"
+    - "container_scan"
+    - "infrastructure_scan"
+  
+  severity_thresholds:
+    block_critical: true
+    block_high: true
+    warn_medium: true
+    log_low: true
+  
+  auto_remediation:
+    enabled: true
+    auto_update_dependencies: false  # Manual approval required
+    auto_patch_os: true
+    quarantine_vulnerable_containers: true
+
+# Compliance Settings
+compliance:
+  gdpr:
+    enabled: true
+    data_retention_days: 1095  # 3 years
+    right_to_erasure: true
+    data_portability: true
+    consent_management: true
+  
+  soc2:
+    enabled: true
+    access_controls: true
+    encryption_requirements: true
+    monitoring_requirements: true
+    incident_response: true
+  
+  iso27001:
+    enabled: true
+    risk_assessment: true
+    security_controls: true
+    continuous_monitoring: true

@@ -1,0 +1,203 @@
+{
+  "name": "React TypeScript App",
+  "description": "Modern React application with TypeScript, Vite, and Tailwind CSS",
+  "category": "web",
+  "type": "frontend",
+  "tags": ["react", "typescript", "vite", "tailwind", "spa"],
+  "tech_stack": ["react", "typescript", "vite", "tailwind", "eslint", "prettier"],
+  "features": [
+    "TypeScript support",
+    "Tailwind CSS styling",
+    "ESLint and Prettier",
+    "Hot module replacement",
+    "Component library ready",
+    "Modern build pipeline",
+    "PWA capabilities",
+    "Testing setup"
+  ],
+  "requirements": {
+    "node_version": ">=18.0.0",
+    "npm_version": ">=9.0.0"
+  },
+  "structure": {
+    "src/": {
+      "components/": {
+        "common/": {},
+        "layout/": {},
+        "features/": {}
+      },
+      "hooks/": {},
+      "services/": {},
+      "utils/": {},
+      "types/": {},
+      "styles/": {},
+      "assets/": {
+        "images/": {},
+        "icons/": {}
+      },
+      "pages/": {},
+      "store/": {},
+      "constants/": {}
+    },
+    "public/": {},
+    "tests/": {
+      "components/": {},
+      "utils/": {},
+      "e2e/": {}
+    },
+    "docs/": {}
+  },
+  "files": {
+    "package.json": {
+      "template": "react-typescript/package.json.hbs",
+      "variables": ["project_name", "description", "author"]
+    },
+    "tsconfig.json": {
+      "template": "react-typescript/tsconfig.json.hbs"
+    },
+    "vite.config.ts": {
+      "template": "react-typescript/vite.config.ts.hbs"
+    },
+    "tailwind.config.js": {
+      "template": "react-typescript/tailwind.config.js.hbs"
+    },
+    "postcss.config.js": {
+      "template": "react-typescript/postcss.config.js.hbs"
+    },
+    ".eslintrc.json": {
+      "template": "react-typescript/.eslintrc.json.hbs"
+    },
+    ".prettierrc": {
+      "template": "react-typescript/.prettierrc.hbs"
+    },
+    "index.html": {
+      "template": "react-typescript/index.html.hbs",
+      "variables": ["project_name", "description"]
+    },
+    "src/main.tsx": {
+      "template": "react-typescript/src/main.tsx.hbs"
+    },
+    "src/App.tsx": {
+      "template": "react-typescript/src/App.tsx.hbs"
+    },
+    "src/App.css": {
+      "template": "react-typescript/src/App.css.hbs"
+    },
+    "src/index.css": {
+      "template": "react-typescript/src/index.css.hbs"
+    },
+    "src/vite-env.d.ts": {
+      "template": "react-typescript/src/vite-env.d.ts.hbs"
+    },
+    "README.md": {
+      "template": "react-typescript/README.md.hbs",
+      "variables": ["project_name", "description", "author"]
+    },
+    ".gitignore": {
+      "template": "common/.gitignore.hbs"
+    },
+    "Dockerfile": {
+      "template": "react-typescript/Dockerfile.hbs"
+    },
+    "docker-compose.yml": {
+      "template": "react-typescript/docker-compose.yml.hbs",
+      "variables": ["project_name"]
+    }
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --ext ts,tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "e2e": "playwright test",
+    "docker:build": "docker build -t {{project_name}} .",
+    "docker:run": "docker run -p 3000:3000 {{project_name}}"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.8.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.27",
+    "@types/react-dom": "^18.0.10",
+    "@typescript-eslint/eslint-plugin": "^5.57.1",
+    "@typescript-eslint/parser": "^5.57.1",
+    "@vitejs/plugin-react": "^3.1.0",
+    "autoprefixer": "^10.4.14",
+    "eslint": "^8.38.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.3.4",
+    "postcss": "^8.4.24",
+    "prettier": "^2.8.8",
+    "tailwindcss": "^3.3.0",
+    "typescript": "^5.0.2",
+    "vite": "^4.3.2",
+    "vitest": "^0.30.1",
+    "@playwright/test": "^1.32.3"
+  },
+  "deployment": {
+    "build_command": "npm run build",
+    "output_directory": "dist",
+    "node_version": "18",
+    "environment_variables": {
+      "NODE_ENV": "production"
+    },
+    "providers": {
+      "vercel": {
+        "framework": "vite",
+        "build_command": "npm run build",
+        "output_directory": "dist"
+      },
+      "netlify": {
+        "build_command": "npm run build",
+        "publish": "dist"
+      },
+      "aws": {
+        "service": "s3",
+        "cloudfront": true
+      }
+    }
+  },
+  "customization": {
+    "ui_library": {
+      "type": "select",
+      "options": ["none", "mui", "chakra", "antd", "mantine"],
+      "default": "none"
+    },
+    "state_management": {
+      "type": "select",
+      "options": ["none", "redux", "zustand", "jotai", "recoil"],
+      "default": "none"
+    },
+    "testing": {
+      "type": "multiselect",
+      "options": ["vitest", "jest", "react-testing-library", "cypress", "playwright"],
+      "default": ["vitest", "react-testing-library"]
+    },
+    "auth": {
+      "type": "select",
+      "options": ["none", "auth0", "firebase", "clerk", "supabase"],
+      "default": "none"
+    },
+    "styling": {
+      "type": "select",
+      "options": ["tailwind", "styled-components", "emotion", "sass", "css-modules"],
+      "default": "tailwind"
+    }
+  },
+  "post_generation": [
+    "npm install",
+    "npm run type-check",
+    "npm run lint",
+    "git init",
+    "git add .",
+    "git commit -m \"Initial commit: React TypeScript project\""
+  ]
+}
