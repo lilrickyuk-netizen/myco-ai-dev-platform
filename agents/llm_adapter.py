@@ -313,5 +313,22 @@ class LLMManager:
         
         raise RuntimeError("All LLM adapters failed")
 
-# Global LLM manager instance
+# Initialize and configure global LLM manager instance
 llm_manager = LLMManager()
+
+# Auto-register available adapters based on config
+def initialize_llm_manager():
+    """Initialize LLM manager with available configurations"""
+    from .config import config
+    
+    # Register all configured LLM adapters
+    for name, llm_config in config.llm_configs.items():
+        try:
+            # Only register if we have an API key or it's a local model
+            if llm_config.api_key or llm_config.provider == LLMProvider.OLLAMA:
+                llm_manager.register_adapter(name, llm_config)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to register adapter {name}: {e}")
+
+# Initialize adapters
+initialize_llm_manager()

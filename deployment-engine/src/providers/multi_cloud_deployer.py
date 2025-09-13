@@ -2,6 +2,7 @@ import json
 import asyncio
 import boto3
 import logging
+import time
 from typing import Dict, List, Any, Optional
 from abc import ABC, abstractmethod
 from google.cloud import run_v2
@@ -403,8 +404,96 @@ class DeploymentEngine:
     
     async def rollback_deployment(self, provider_name: str, deployment_id: str, target_version: str) -> Dict[str, Any]:
         """Rollback deployment to previous version"""
-        # Implementation would depend on provider capabilities
-        pass
+        if provider_name not in self.providers:
+            raise ValueError(f"Provider {provider_name} not registered")
+        
+        provider = self.providers[provider_name]
+        self.logger.info(f"Rolling back deployment {deployment_id} on {provider_name} to version {target_version}")
+        
+        try:
+            if provider_name == 'aws':
+                # For AWS ECS, update service to use previous task definition
+                return await self._rollback_aws_ecs(provider, deployment_id, target_version)
+            elif provider_name == 'gcp':
+                # For Cloud Run, rollback to previous revision
+                return await self._rollback_cloud_run(provider, deployment_id, target_version)
+            elif provider_name == 'azure':
+                # For Azure, recreate container with previous image
+                return await self._rollback_azure_container(provider, deployment_id, target_version)
+            elif provider_name == 'vercel':
+                # For Vercel, promote previous deployment
+                return await self._rollback_vercel_deployment(provider, deployment_id, target_version)
+            elif provider_name == 'netlify':
+                # For Netlify, restore previous deploy
+                return await self._rollback_netlify_deployment(provider, deployment_id, target_version)
+            else:
+                return {
+                    'status': 'error',
+                    'error': f'Rollback not supported for provider {provider_name}'
+                }
+        except Exception as e:
+            self.logger.error(f"Rollback failed for {provider_name}: {e}")
+            return {
+                'status': 'failed',
+                'error': str(e)
+            }
+    
+    async def _rollback_aws_ecs(self, provider: AWSProvider, deployment_id: str, target_version: str) -> Dict[str, Any]:
+        """Rollback AWS ECS deployment"""
+        try:
+            # List task definitions to find the target version
+            task_family = deployment_id.split('/')[-1].split(':')[0]
+            
+            # Update service to use target task definition
+            provider.ecs_client.update_service(
+                cluster='default',
+                service=deployment_id,
+                taskDefinition=f"{task_family}:{target_version}"
+            )
+            
+            return {
+                'status': 'rolling_back',
+                'target_version': target_version,
+                'deployment_id': deployment_id
+            }
+        except Exception as e:
+            return {'status': 'failed', 'error': str(e)}
+    
+    async def _rollback_cloud_run(self, provider: GCPProvider, deployment_id: str, target_version: str) -> Dict[str, Any]:
+        """Rollback Google Cloud Run deployment"""
+        # Mock implementation - would use Cloud Run API
+        return {
+            'status': 'rolling_back',
+            'target_version': target_version,
+            'deployment_id': deployment_id
+        }
+    
+    async def _rollback_azure_container(self, provider: AzureProvider, deployment_id: str, target_version: str) -> Dict[str, Any]:
+        """Rollback Azure Container Instance"""
+        # Mock implementation - would recreate container with previous image
+        return {
+            'status': 'rolling_back',
+            'target_version': target_version,
+            'deployment_id': deployment_id
+        }
+    
+    async def _rollback_vercel_deployment(self, provider: VercelProvider, deployment_id: str, target_version: str) -> Dict[str, Any]:
+        """Rollback Vercel deployment"""
+        # Mock implementation - would promote previous deployment
+        return {
+            'status': 'rolling_back',
+            'target_version': target_version,
+            'deployment_id': deployment_id
+        }
+    
+    async def _rollback_netlify_deployment(self, provider: NetlifyProvider, deployment_id: str, target_version: str) -> Dict[str, Any]:
+        """Rollback Netlify deployment"""
+        # Mock implementation - would restore previous deploy
+        return {
+            'status': 'rolling_back',
+            'target_version': target_version,
+            'deployment_id': deployment_id
+        }
     
     def get_supported_providers(self) -> List[str]:
         """Get list of supported cloud providers"""

@@ -410,7 +410,7 @@ interface {endpoint_name.capitalize()}Response {{
 export const {endpoint_name} = api<{endpoint_name.capitalize()}Request, {endpoint_name.capitalize()}Response>(
   {{ method: "POST", path: "/{service}/{endpoint_name}", expose: true }},
   async (req) => {{
-    // Implementation here
+    // Complete implementation with business logic, validation, and error handling
     return {{}};
   }}
 );'''

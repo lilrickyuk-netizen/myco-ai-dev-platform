@@ -1,146 +1,181 @@
-import json
 import asyncio
+import json
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-import uuid
-
-from ..base_agent import BaseAgent, AgentType, Task, TaskPriority, AgentExecutionContext, AgentStatus
+from ..base_agent import BaseAgent, AgentType, Task, TaskPriority, AgentExecutionContext
 from ..llm_adapter import LLMMessage, llm_manager
-from ..config import config
 
 class ArchitectureAgent(BaseAgent):
+    """Agent responsible for system architecture design and technical decisions"""
+    
     def __init__(self):
-        super().__init__("architecture-001", AgentType.ARCHITECTURE)
+        super().__init__("architect-001", AgentType.ARCHITECTURE)
         self.capabilities = [
             "system_design",
-            "architecture_patterns",
-            "database_design",
+            "database_design", 
             "api_design",
-            "microservices_design",
             "security_architecture",
-            "performance_architecture",
-            "scalability_design"
+            "scalability_design",
+            "technology_selection",
+            "integration_design",
+            "performance_architecture"
         ]
         self.logger = logging.getLogger(__name__)
         
     def can_handle_task(self, task: Task) -> bool:
-        return task.type in [
+        """Check if this agent can handle the given task"""
+        architecture_tasks = [
             "design_system_architecture",
-            "design_database",
-            "design_api",
-            "design_microservices",
+            "design_database_schema",
+            "design_api_structure",
+            "select_technology_stack",
             "design_security_architecture",
-            "design_data_flow",
-            "create_architecture_decision_records"
+            "create_integration_plan",
+            "design_deployment_architecture",
+            "create_architecture_documentation"
         ]
+        return task.type in architecture_tasks
     
     async def execute_task(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Execute architecture design tasks"""
-        self.logger.info(f"Executing architecture task: {task.type}")
+        """Execute architecture tasks"""
         
         if task.type == "design_system_architecture":
             return await self._design_system_architecture(task, context)
-        elif task.type == "design_database":
-            return await self._design_database(task, context)
-        elif task.type == "design_api":
-            return await self._design_api(task, context)
-        elif task.type == "design_microservices":
-            return await self._design_microservices(task, context)
+        elif task.type == "design_database_schema":
+            return await self._design_database_schema(task, context)
+        elif task.type == "design_api_structure":
+            return await self._design_api_structure(task, context)
+        elif task.type == "select_technology_stack":
+            return await self._select_technology_stack(task, context)
         elif task.type == "design_security_architecture":
             return await self._design_security_architecture(task, context)
-        elif task.type == "design_data_flow":
-            return await self._design_data_flow(task, context)
-        elif task.type == "create_architecture_decision_records":
-            return await self._create_adrs(task, context)
+        elif task.type == "create_integration_plan":
+            return await self._create_integration_plan(task, context)
+        elif task.type == "design_deployment_architecture":
+            return await self._design_deployment_architecture(task, context)
+        elif task.type == "create_architecture_documentation":
+            return await self._create_architecture_documentation(task, context)
         else:
             raise ValueError(f"Unknown task type: {task.type}")
     
     async def _design_system_architecture(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
         """Design overall system architecture"""
+        
         requirements = task.inputs.get("requirements", {})
-        planning_results = task.inputs.get("planning_results", {})
+        non_functional_requirements = task.inputs.get("non_functional_requirements", {})
+        constraints = task.inputs.get("constraints", [])
         
         messages = [
             LLMMessage(
                 role="system",
-                content="""You are a senior software architect with expertise in designing scalable, maintainable systems. Design a comprehensive system architecture.
+                content="""You are a senior system architect designing scalable, maintainable software systems. Create a comprehensive system architecture based on the requirements.
 
-Include:
-1. High-level architecture overview
-2. Component breakdown
-3. Service boundaries
-4. Data flow diagrams
-5. Technology stack mapping
-6. Deployment architecture
-7. Scalability considerations
-8. Security considerations
-9. Integration patterns
-10. Architecture patterns used
+Design considerations:
+1. System patterns (microservices, monolith, serverless)
+2. Component architecture and interactions
+3. Data flow and storage patterns
+4. Scalability and performance
+5. Security and compliance
+6. Deployment and operations
+7. Integration patterns
+8. Technology stack recommendations
 
 Format as JSON:
 {
     "architecture_overview": {
-        "pattern": "microservices/monolith/serverless/etc",
-        "description": "overview",
-        "principles": ["design principles"],
-        "quality_attributes": ["scalability", "security", "etc"]
+        "pattern": "microservices|monolith|serverless|hybrid",
+        "description": "Overall architecture description",
+        "key_principles": ["principle1", "principle2"],
+        "architectural_drivers": ["driver1", "driver2"]
     },
-    "components": [
+    "system_components": [
         {
-            "name": "component name",
-            "type": "service/library/database/etc",
-            "responsibilities": ["list"],
-            "interfaces": ["interfaces"],
-            "dependencies": ["components"],
-            "technology": "tech choice",
-            "rationale": "why this choice"
+            "name": "component_name",
+            "type": "service|database|queue|cache|gateway",
+            "description": "component description",
+            "responsibilities": ["responsibility1", "responsibility2"],
+            "interfaces": [
+                {
+                    "type": "REST|GraphQL|gRPC|Message",
+                    "protocol": "HTTP|TCP|UDP",
+                    "format": "JSON|XML|Binary"
+                }
+            ],
+            "dependencies": ["other_component"],
+            "technology_recommendations": ["tech1", "tech2"]
         }
     ],
-    "service_boundaries": {
-        "service_name": {
-            "domain": "business domain",
-            "responsibilities": ["list"],
-            "data_owned": ["data entities"],
-            "apis_exposed": ["api endpoints"],
-            "dependencies": ["other services"]
-        }
-    },
     "data_architecture": {
-        "storage_strategy": "description",
-        "data_flow": "description",
-        "consistency_model": "eventual/strong/etc",
-        "backup_strategy": "description"
+        "storage_pattern": "CQRS|Event Sourcing|Traditional",
+        "databases": [
+            {
+                "name": "primary_db",
+                "type": "PostgreSQL|MySQL|MongoDB|Redis",
+                "purpose": "primary data storage",
+                "components_using": ["component1"]
+            }
+        ],
+        "data_flow": [
+            {
+                "from": "component1",
+                "to": "component2", 
+                "type": "synchronous|asynchronous",
+                "format": "JSON|Event"
+            }
+        ]
+    },
+    "integration_architecture": {
+        "api_gateway": {
+            "required": true,
+            "purpose": "centralized API management",
+            "features": ["authentication", "rate_limiting", "monitoring"]
+        },
+        "message_broker": {
+            "required": false,
+            "type": "RabbitMQ|Apache Kafka|Redis",
+            "use_cases": ["async processing", "event streaming"]
+        },
+        "external_integrations": [
+            {
+                "system": "external_system",
+                "pattern": "REST API|Webhook|File Transfer",
+                "security": "OAuth|API Key|mTLS"
+            }
+        ]
+    },
+    "quality_attributes": {
+        "scalability": {
+            "horizontal_scaling": "supported",
+            "scaling_strategy": "auto-scaling based on metrics",
+            "bottlenecks": ["database", "file storage"]
+        },
+        "performance": {
+            "response_time_target": "< 200ms",
+            "throughput_target": "1000 req/sec",
+            "optimization_strategies": ["caching", "CDN"]
+        },
+        "availability": {
+            "target": "99.9%",
+            "strategies": ["redundancy", "health checks", "graceful degradation"]
+        },
+        "security": {
+            "authentication": "JWT tokens",
+            "authorization": "RBAC",
+            "data_protection": "encryption at rest and in transit"
+        }
     },
     "deployment_architecture": {
-        "environments": ["dev/staging/prod"],
-        "deployment_strategy": "blue-green/rolling/etc",
-        "infrastructure": "cloud/on-premise/hybrid",
-        "monitoring": "strategy",
-        "logging": "strategy"
-    },
-    "integration_patterns": ["patterns used"],
-    "cross_cutting_concerns": {
-        "authentication": "strategy",
-        "authorization": "strategy",
-        "logging": "strategy",
-        "monitoring": "strategy",
-        "error_handling": "strategy",
-        "caching": "strategy"
-    },
-    "trade_offs": [
-        {
-            "decision": "what was decided",
-            "alternatives": ["other options"],
-            "rationale": "why this choice",
-            "consequences": ["implications"]
-        }
-    ]
+        "deployment_pattern": "containerized|serverless|traditional",
+        "environments": ["development", "staging", "production"],
+        "infrastructure": "cloud|on-premise|hybrid",
+        "orchestration": "Kubernetes|Docker Swarm|ECS"
+    }
 }"""
             ),
             LLMMessage(
                 role="user",
-                content=f"Design system architecture for:\nRequirements: {json.dumps(requirements, indent=2)}\nPlanning Results: {json.dumps(planning_results, indent=2)}"
+                content=f"Design system architecture for:\n\nRequirements: {json.dumps(requirements, indent=2)}\n\nNon-functional Requirements: {json.dumps(non_functional_requirements, indent=2)}\n\nConstraints: {json.dumps(constraints, indent=2)}"
             )
         ]
         
@@ -150,107 +185,119 @@ Format as JSON:
             
             return {
                 "system_architecture": architecture,
-                "requirements": requirements,
-                "planning_results": planning_results,
-                "design_timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": response.tokens_used
+                "architecture_metadata": {
+                    "designed_at": datetime.utcnow().isoformat(),
+                    "architect": self.agent_id,
+                    "version": "1.0",
+                    "review_status": "draft"
+                },
+                "architecture_decisions": self._extract_key_decisions(architecture),
+                "trade_offs": self._identify_trade_offs(architecture)
             }
         except Exception as e:
             self.logger.error(f"System architecture design failed: {e}")
             raise
     
-    async def _design_database(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Design database schema and architecture"""
-        requirements = task.inputs.get("requirements", {})
-        tech_stack = task.inputs.get("tech_stack", [])
+    async def _design_database_schema(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
+        """Design database schema and data model"""
+        
+        data_requirements = task.inputs.get("data_requirements", {})
+        entities = task.inputs.get("entities", [])
+        business_rules = task.inputs.get("business_rules", [])
         
         messages = [
             LLMMessage(
                 role="system",
-                content="""You are a database architect. Design a comprehensive database architecture and schema.
+                content="""You are a database architect designing optimal database schemas. Create a comprehensive data model and schema design.
 
-Include:
-1. Database technology selection rationale
-2. Schema design with relationships
+Design considerations:
+1. Entity relationships and cardinalities
+2. Normalization vs denormalization
 3. Indexing strategy
-4. Data partitioning strategy
-5. Backup and recovery strategy
-6. Performance optimization
-7. Security considerations
-8. Scalability approach
-9. Migration strategy
+4. Data types and constraints
+5. Performance optimization
+6. Data integrity and consistency
+7. Scalability considerations
+8. Migration strategy
 
 Format as JSON:
 {
-    "database_selection": {
-        "primary_db": "PostgreSQL/MongoDB/etc",
-        "rationale": "why this choice",
-        "alternatives_considered": ["other options"],
-        "additional_stores": {
-            "cache": "Redis/Memcached",
-            "search": "Elasticsearch/etc",
-            "analytics": "ClickHouse/etc"
+    "database_design": {
+        "type": "relational|document|graph|key-value",
+        "schema_pattern": "normalized|denormalized|hybrid",
+        "design_principles": ["principle1", "principle2"]
+    },
+    "entities": [
+        {
+            "name": "entity_name",
+            "description": "entity description",
+            "table_name": "table_name",
+            "fields": [
+                {
+                    "name": "field_name",
+                    "type": "VARCHAR|INTEGER|TIMESTAMP|JSON",
+                    "nullable": false,
+                    "unique": false,
+                    "default": null,
+                    "constraints": ["constraint description"],
+                    "index": false,
+                    "description": "field purpose"
+                }
+            ],
+            "primary_key": ["field1"],
+            "indexes": [
+                {
+                    "name": "index_name",
+                    "fields": ["field1", "field2"],
+                    "type": "btree|hash|gin",
+                    "unique": false
+                }
+            ]
         }
+    ],
+    "relationships": [
+        {
+            "name": "relationship_name",
+            "type": "one-to-one|one-to-many|many-to-many",
+            "from_entity": "entity1",
+            "to_entity": "entity2",
+            "foreign_key": "field_name",
+            "cascade_delete": false,
+            "description": "relationship description"
+        }
+    ],
+    "views": [
+        {
+            "name": "view_name",
+            "description": "view purpose",
+            "query": "SELECT statement",
+            "materialized": false
+        }
+    ],
+    "stored_procedures": [
+        {
+            "name": "procedure_name",
+            "purpose": "procedure purpose",
+            "parameters": ["param1", "param2"],
+            "returns": "return type"
+        }
+    ],
+    "data_migration": {
+        "migration_strategy": "big bang|phased|parallel run",
+        "migration_scripts": ["script1", "script2"],
+        "rollback_plan": "rollback strategy"
     },
-    "schema_design": {
-        "entities": [
-            {
-                "name": "entity name",
-                "attributes": [
-                    {
-                        "name": "attribute",
-                        "type": "data type",
-                        "constraints": ["NOT NULL", "UNIQUE", "etc"],
-                        "description": "purpose"
-                    }
-                ],
-                "relationships": [
-                    {
-                        "type": "one-to-many/many-to-many/etc",
-                        "target": "related entity",
-                        "description": "relationship description"
-                    }
-                ],
-                "indexes": ["index definitions"],
-                "business_rules": ["rules"]
-            }
-        ],
-        "views": ["view definitions"],
-        "stored_procedures": ["procedure definitions"]
-    },
-    "performance_strategy": {
-        "indexing": "strategy",
-        "partitioning": "strategy",
-        "caching": "strategy",
-        "query_optimization": "strategy"
-    },
-    "scalability_strategy": {
-        "read_replicas": "strategy",
-        "sharding": "strategy",
-        "connection_pooling": "strategy"
-    },
-    "security_strategy": {
-        "authentication": "strategy",
-        "authorization": "strategy",
-        "encryption": "at rest and in transit",
-        "audit_logging": "strategy"
-    },
-    "backup_recovery": {
-        "backup_frequency": "schedule",
-        "retention_policy": "policy",
-        "recovery_strategy": "strategy",
-        "disaster_recovery": "strategy"
-    },
-    "migration_strategy": {
-        "versioning": "strategy",
-        "rollback": "strategy",
-        "data_migration": "strategy"
+    "performance_optimization": {
+        "partitioning": "none|horizontal|vertical",
+        "archiving_strategy": "time-based archiving after 2 years",
+        "caching_strategy": "Redis for frequently accessed data",
+        "read_replicas": "required for scaling reads"
     }
 }"""
             ),
             LLMMessage(
                 role="user",
-                content=f"Design database for:\nRequirements: {json.dumps(requirements, indent=2)}\nTech Stack: {tech_stack}"
+                content=f"Design database schema for:\n\nData Requirements: {json.dumps(data_requirements, indent=2)}\n\nEntities: {json.dumps(entities, indent=2)}\n\nBusiness Rules: {json.dumps(business_rules, indent=2)}"
             )
         ]
         
@@ -258,117 +305,119 @@ Format as JSON:
             response = await llm_manager.complete_with_fallback(messages)
             database_design = json.loads(response.content)
             
+            # Generate SQL migration scripts
+            migration_scripts = self._generate_migration_scripts(database_design)
+            
             return {
                 "database_design": database_design,
-                "requirements": requirements,
-                "tech_stack": tech_stack,
-                "design_timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": response.tokens_used
+                "migration_scripts": migration_scripts,
+                "design_metadata": {
+                    "designed_at": datetime.utcnow().isoformat(),
+                    "designer": self.agent_id,
+                    "schema_version": "1.0"
+                }
             }
         except Exception as e:
-            self.logger.error(f"Database design failed: {e}")
+            self.logger.error(f"Database schema design failed: {e}")
             raise
     
-    async def _design_api(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Design REST API endpoints and contracts"""
-        requirements = task.inputs.get("requirements", {})
-        system_architecture = task.inputs.get("system_architecture", {})
+    async def _design_api_structure(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
+        """Design API structure and endpoints"""
+        
+        functional_requirements = task.inputs.get("functional_requirements", [])
+        user_stories = task.inputs.get("user_stories", [])
         
         messages = [
             LLMMessage(
                 role="system",
-                content="""You are an API architect. Design comprehensive REST API specifications.
+                content="""You are an API architect designing RESTful APIs. Create a comprehensive API design with endpoints, schemas, and documentation.
 
-Include:
-1. API design principles
-2. Resource identification
-3. Endpoint specifications
+Design principles:
+1. RESTful design patterns
+2. Resource-oriented URLs
+3. HTTP methods and status codes
 4. Request/response schemas
-5. Authentication/authorization
-6. Error handling
-7. Rate limiting
+5. Error handling
+6. Authentication and authorization
+7. Rate limiting and pagination
 8. Versioning strategy
-9. Documentation strategy
 
-Format as JSON (following OpenAPI 3.0 style):
+Format as JSON:
 {
-    "api_design_principles": ["RESTful", "stateless", "etc"],
-    "base_url": "https://api.example.com/v1",
-    "authentication": {
-        "type": "JWT/OAuth/API Key/etc",
-        "implementation": "description"
+    "api_design": {
+        "base_url": "/api/v1",
+        "authentication": "JWT|OAuth2|API Key",
+        "versioning_strategy": "URL path|Header|Query parameter",
+        "content_type": "application/json",
+        "rate_limiting": "100 requests per minute per user"
     },
     "endpoints": [
         {
-            "path": "/resource/{id}",
-            "method": "GET/POST/PUT/DELETE",
-            "description": "endpoint purpose",
+            "path": "/users",
+            "method": "GET",
+            "summary": "List users",
+            "description": "Retrieve a paginated list of users",
             "parameters": [
                 {
-                    "name": "parameter",
-                    "in": "path/query/header",
-                    "type": "string/integer/etc",
-                    "required": true,
-                    "description": "purpose"
+                    "name": "page",
+                    "type": "query",
+                    "data_type": "integer",
+                    "required": false,
+                    "default": 1,
+                    "description": "Page number"
                 }
             ],
-            "request_schema": {
+            "request_schema": null,
+            "response_schema": {
                 "type": "object",
-                "properties": {}
-            },
-            "response_schemas": {
-                "200": {
-                    "description": "success",
-                    "schema": {}
-                },
-                "400": {
-                    "description": "bad request",
-                    "schema": {}
+                "properties": {
+                    "users": {"type": "array", "items": {"$ref": "#/components/schemas/User"}},
+                    "pagination": {"$ref": "#/components/schemas/Pagination"}
                 }
             },
-            "authorization": "required roles/permissions",
-            "rate_limit": "requests per minute"
+            "responses": {
+                "200": "Success",
+                "400": "Bad Request",
+                "401": "Unauthorized",
+                "500": "Internal Server Error"
+            },
+            "authentication_required": true,
+            "rate_limit": "standard"
         }
     ],
-    "data_models": {
-        "model_name": {
+    "schemas": [
+        {
+            "name": "User",
             "type": "object",
             "properties": {
-                "field": {
-                    "type": "string/integer/etc",
-                    "description": "purpose",
-                    "example": "example value"
-                }
+                "id": {"type": "string", "format": "uuid"},
+                "email": {"type": "string", "format": "email"},
+                "created_at": {"type": "string", "format": "date-time"}
             },
-            "required": ["field1", "field2"]
+            "required": ["id", "email"]
         }
-    },
+    ],
     "error_handling": {
-        "standard_errors": ["400", "401", "403", "404", "500"],
         "error_format": {
-            "error": "error code",
-            "message": "human readable",
-            "details": "additional info"
-        }
+            "error": {"type": "string"},
+            "message": {"type": "string"},
+            "details": {"type": "object"}
+        },
+        "error_codes": [
+            {"code": "VALIDATION_ERROR", "description": "Request validation failed"},
+            {"code": "RESOURCE_NOT_FOUND", "description": "Requested resource not found"}
+        ]
     },
-    "versioning": {
-        "strategy": "URL/header/etc",
-        "current_version": "v1",
-        "deprecation_policy": "policy"
-    },
-    "rate_limiting": {
-        "strategy": "token bucket/etc",
-        "default_limits": "requests per time"
-    },
-    "caching": {
-        "strategy": "description",
-        "cache_headers": ["headers to use"]
+    "security": {
+        "authentication_flow": "OAuth2 Authorization Code",
+        "authorization_model": "Role-based access control",
+        "data_protection": "All sensitive data encrypted"
     }
 }"""
             ),
             LLMMessage(
                 role="user",
-                content=f"Design API for:\nRequirements: {json.dumps(requirements, indent=2)}\nSystem Architecture: {json.dumps(system_architecture, indent=2)}"
+                content=f"Design API structure for:\n\nFunctional Requirements: {json.dumps(functional_requirements, indent=2)}\n\nUser Stories: {json.dumps(user_stories, indent=2)}"
             )
         ]
         
@@ -376,210 +425,167 @@ Format as JSON (following OpenAPI 3.0 style):
             response = await llm_manager.complete_with_fallback(messages)
             api_design = json.loads(response.content)
             
+            # Generate OpenAPI specification
+            openapi_spec = self._generate_openapi_spec(api_design)
+            
             return {
                 "api_design": api_design,
-                "requirements": requirements,
-                "system_architecture": system_architecture,
-                "design_timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": response.tokens_used
+                "openapi_specification": openapi_spec,
+                "api_metadata": {
+                    "designed_at": datetime.utcnow().isoformat(),
+                    "designer": self.agent_id,
+                    "api_version": "1.0"
+                }
             }
         except Exception as e:
-            self.logger.error(f"API design failed: {e}")
+            self.logger.error(f"API structure design failed: {e}")
             raise
     
-    async def _design_microservices(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Design microservices architecture"""
+    async def _select_technology_stack(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
+        """Select appropriate technology stack"""
+        
         requirements = task.inputs.get("requirements", {})
-        system_architecture = task.inputs.get("system_architecture", {})
+        constraints = task.inputs.get("constraints", [])
+        team_skills = task.inputs.get("team_skills", [])
         
         messages = [
             LLMMessage(
                 role="system",
-                content="""You are a microservices architect. Design a comprehensive microservices architecture.
+                content="""You are a technology architect selecting the optimal technology stack. Consider requirements, constraints, team skills, and industry best practices.
 
-Include:
-1. Service decomposition strategy
-2. Service boundaries
-3. Inter-service communication
-4. Data management
-5. Service discovery
-6. Load balancing
-7. Circuit breakers
-8. Monitoring and observability
-9. Deployment strategy
+Evaluation criteria:
+1. Technical fit for requirements
+2. Team expertise and learning curve
+3. Community support and maturity
+4. Performance characteristics
+5. Scalability potential
+6. Long-term maintenance
+7. Cost considerations
+8. Integration capabilities
 
 Format as JSON:
 {
-    "decomposition_strategy": {
-        "approach": "domain-driven/data-driven/etc",
-        "principles": ["single responsibility", "etc"],
-        "criteria": ["business capability", "etc"]
+    "technology_stack": {
+        "frontend": {
+            "framework": "React|Vue|Angular|Svelte",
+            "language": "TypeScript|JavaScript",
+            "ui_library": "Material-UI|Ant Design|Tailwind CSS",
+            "state_management": "Redux|Vuex|NgRx|Context API",
+            "build_tool": "Vite|Webpack|Parcel",
+            "testing": "Jest|Vitest|Cypress",
+            "justification": "Why this choice was made"
+        },
+        "backend": {
+            "framework": "Node.js|Python|Java|Go|.NET",
+            "web_framework": "Express|FastAPI|Spring|Gin|ASP.NET",
+            "database": "PostgreSQL|MySQL|MongoDB|Redis",
+            "orm": "TypeORM|Prisma|SQLAlchemy|Hibernate",
+            "authentication": "JWT|OAuth2|Passport",
+            "testing": "Jest|pytest|JUnit|Testify",
+            "justification": "Why this choice was made"
+        },
+        "infrastructure": {
+            "cloud_provider": "AWS|GCP|Azure|DigitalOcean",
+            "container_platform": "Docker|Kubernetes|Docker Swarm",
+            "ci_cd": "GitHub Actions|GitLab CI|Jenkins|CircleCI",
+            "monitoring": "Prometheus|DataDog|New Relic",
+            "logging": "ELK Stack|Fluentd|CloudWatch",
+            "justification": "Why this choice was made"
+        },
+        "development_tools": {
+            "version_control": "Git",
+            "code_editor": "VS Code|IntelliJ|Vim",
+            "api_documentation": "Swagger|Postman|Insomnia",
+            "project_management": "Jira|GitHub Issues|Linear"
+        }
     },
-    "services": [
+    "decision_matrix": [
         {
-            "name": "service name",
-            "domain": "business domain",
-            "responsibilities": ["list"],
-            "api_type": "REST/GraphQL/gRPC",
-            "data_storage": "database type",
-            "dependencies": ["other services"],
-            "scalability_requirements": "description",
-            "technology_stack": ["technologies"]
+            "category": "Frontend Framework",
+            "options": [
+                {
+                    "name": "React",
+                    "score": 9,
+                    "pros": ["Large ecosystem", "Team expertise"],
+                    "cons": ["Learning curve for beginners"]
+                }
+            ],
+            "selected": "React",
+            "rationale": "Best fit for team skills and requirements"
         }
     ],
-    "communication_patterns": {
-        "synchronous": {
-            "protocol": "HTTP/gRPC",
-            "patterns": ["request-response", "etc"]
-        },
-        "asynchronous": {
-            "protocol": "message queue/event streaming",
-            "patterns": ["event-driven", "pub-sub", "etc"]
-        }
-    },
-    "data_management": {
-        "strategy": "database per service/shared/etc",
-        "consistency": "eventual/strong",
-        "transactions": "saga/2PC/etc",
-        "data_synchronization": "strategy"
-    },
-    "infrastructure_patterns": {
-        "service_discovery": "Consul/Eureka/etc",
-        "load_balancing": "strategy",
-        "api_gateway": "technology",
-        "circuit_breaker": "Hystrix/etc",
-        "rate_limiting": "strategy"
-    },
-    "observability": {
-        "logging": "centralized/distributed",
-        "monitoring": "metrics strategy",
-        "tracing": "distributed tracing",
-        "health_checks": "strategy"
-    },
-    "deployment": {
-        "containerization": "Docker/etc",
-        "orchestration": "Kubernetes/etc",
-        "ci_cd": "strategy",
-        "blue_green": "strategy"
-    },
-    "security": {
-        "authentication": "service-to-service auth",
-        "authorization": "service policies",
-        "encryption": "in-transit/at-rest"
+    "implementation_plan": {
+        "development_phases": [
+            {
+                "phase": "Setup",
+                "duration": "1 week",
+                "activities": ["Environment setup", "Tooling configuration"]
+            }
+        ],
+        "learning_requirements": [
+            {
+                "technology": "TypeScript",
+                "team_members": 2,
+                "training_needed": "1 week"
+            }
+        ],
+        "risk_mitigation": [
+            {
+                "risk": "Team unfamiliarity with technology",
+                "mitigation": "Provide training and pair programming"
+            }
+        ]
     }
 }"""
             ),
             LLMMessage(
                 role="user",
-                content=f"Design microservices for:\nRequirements: {json.dumps(requirements, indent=2)}\nSystem Architecture: {json.dumps(system_architecture, indent=2)}"
+                content=f"Select technology stack for:\n\nRequirements: {json.dumps(requirements, indent=2)}\n\nConstraints: {json.dumps(constraints, indent=2)}\n\nTeam Skills: {json.dumps(team_skills, indent=2)}"
             )
         ]
         
         try:
             response = await llm_manager.complete_with_fallback(messages)
-            microservices_design = json.loads(response.content)
+            tech_stack = json.loads(response.content)
             
             return {
-                "microservices_design": microservices_design,
-                "requirements": requirements,
-                "system_architecture": system_architecture,
-                "design_timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": response.tokens_used
+                "technology_stack": tech_stack,
+                "selection_metadata": {
+                    "selected_at": datetime.utcnow().isoformat(),
+                    "selector": self.agent_id,
+                    "evaluation_method": "weighted_scoring"
+                }
             }
         except Exception as e:
-            self.logger.error(f"Microservices design failed: {e}")
+            self.logger.error(f"Technology stack selection failed: {e}")
             raise
     
     async def _design_security_architecture(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Design security architecture"""
-        requirements = task.inputs.get("requirements", {})
-        system_architecture = task.inputs.get("system_architecture", {})
+        """Design security architecture and measures"""
+        
+        security_requirements = task.inputs.get("security_requirements", {})
+        compliance_requirements = task.inputs.get("compliance_requirements", [])
         
         messages = [
             LLMMessage(
                 role="system",
-                content="""You are a security architect. Design comprehensive security architecture.
+                content="""You are a security architect designing comprehensive security measures. Create a security architecture that addresses all security concerns.
 
-Include:
-1. Security principles and framework
-2. Authentication and authorization
-3. Data protection
-4. Network security
-5. Application security
-6. Infrastructure security
-7. Compliance requirements
-8. Incident response
-9. Security monitoring
+Security domains:
+1. Authentication and authorization
+2. Data protection and encryption
+3. Network security
+4. Application security
+5. Infrastructure security
+6. Compliance and governance
+7. Incident response
+8. Security monitoring
 
-Format as JSON:
-{
-    "security_framework": {
-        "principles": ["defense in depth", "least privilege", "etc"],
-        "standards": ["OWASP", "NIST", "etc"],
-        "compliance": ["GDPR", "SOC2", "etc"]
-    },
-    "authentication": {
-        "strategy": "JWT/OAuth/SAML/etc",
-        "multi_factor": "implementation",
-        "session_management": "strategy",
-        "password_policy": "requirements"
-    },
-    "authorization": {
-        "model": "RBAC/ABAC/etc",
-        "implementation": "strategy",
-        "api_security": "strategy",
-        "resource_protection": "strategy"
-    },
-    "data_protection": {
-        "classification": "public/internal/confidential/etc",
-        "encryption_at_rest": "strategy",
-        "encryption_in_transit": "strategy",
-        "key_management": "strategy",
-        "data_masking": "strategy",
-        "backup_security": "strategy"
-    },
-    "network_security": {
-        "perimeter_security": "firewalls/WAF/etc",
-        "network_segmentation": "strategy",
-        "vpn": "strategy",
-        "ddos_protection": "strategy"
-    },
-    "application_security": {
-        "secure_coding": "practices",
-        "input_validation": "strategy",
-        "output_encoding": "strategy",
-        "session_security": "strategy",
-        "api_security": "strategy"
-    },
-    "infrastructure_security": {
-        "server_hardening": "strategy",
-        "container_security": "strategy",
-        "cloud_security": "strategy",
-        "secrets_management": "strategy"
-    },
-    "monitoring_detection": {
-        "security_monitoring": "strategy",
-        "intrusion_detection": "strategy",
-        "vulnerability_scanning": "strategy",
-        "log_analysis": "strategy"
-    },
-    "incident_response": {
-        "response_plan": "strategy",
-        "escalation": "procedures",
-        "forensics": "strategy",
-        "recovery": "strategy"
-    },
-    "security_testing": {
-        "static_analysis": "tools",
-        "dynamic_analysis": "tools",
-        "penetration_testing": "strategy",
-        "security_reviews": "process"
-    }
-}"""
+Format as JSON with detailed security architecture."""
             ),
             LLMMessage(
                 role="user",
-                content=f"Design security architecture for:\nRequirements: {json.dumps(requirements, indent=2)}\nSystem Architecture: {json.dumps(system_architecture, indent=2)}"
+                content=f"Design security architecture for:\n\nSecurity Requirements: {json.dumps(security_requirements, indent=2)}\n\nCompliance: {json.dumps(compliance_requirements, indent=2)}"
             )
         ]
         
@@ -589,191 +595,224 @@ Format as JSON:
             
             return {
                 "security_architecture": security_architecture,
-                "requirements": requirements,
-                "system_architecture": system_architecture,
-                "design_timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": response.tokens_used
+                "security_metadata": {
+                    "designed_at": datetime.utcnow().isoformat(),
+                    "designer": self.agent_id,
+                    "compliance_level": "high"
+                }
             }
         except Exception as e:
             self.logger.error(f"Security architecture design failed: {e}")
             raise
     
-    async def _design_data_flow(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Design data flow architecture"""
-        system_architecture = task.inputs.get("system_architecture", {})
-        database_design = task.inputs.get("database_design", {})
+    async def _create_integration_plan(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
+        """Create integration plan for external systems"""
         
-        messages = [
-            LLMMessage(
-                role="system",
-                content="""You are a data architect. Design comprehensive data flow architecture.
-
-Include:
-1. Data flow diagrams
-2. Data transformation pipelines
-3. Data integration patterns
-4. Event flow
-5. Batch processing
-6. Real-time processing
-7. Data quality
-8. Data governance
-
-Format as JSON:
-{
-    "data_flows": [
-        {
-            "name": "flow name",
-            "source": "data source",
-            "destination": "data destination",
-            "transformation": "transformation logic",
-            "frequency": "real-time/batch/scheduled",
-            "volume": "expected data volume",
-            "format": "JSON/XML/CSV/etc"
-        }
-    ],
-    "integration_patterns": {
-        "api_integration": "strategy",
-        "message_queues": "strategy",
-        "file_transfer": "strategy",
-        "database_sync": "strategy"
-    },
-    "event_architecture": {
-        "event_sourcing": "strategy",
-        "event_streaming": "Kafka/etc",
-        "cqrs": "implementation",
-        "saga_pattern": "implementation"
-    },
-    "processing_patterns": {
-        "batch_processing": {
-            "framework": "Spark/Hadoop/etc",
-            "schedule": "timing",
-            "error_handling": "strategy"
-        },
-        "stream_processing": {
-            "framework": "Kafka Streams/Flink/etc",
-            "windowing": "strategy",
-            "state_management": "strategy"
-        }
-    },
-    "data_quality": {
-        "validation_rules": ["rules"],
-        "data_profiling": "strategy",
-        "anomaly_detection": "strategy",
-        "error_handling": "strategy"
-    },
-    "data_governance": {
-        "data_lineage": "tracking strategy",
-        "data_catalog": "strategy",
-        "privacy": "strategy",
-        "retention": "strategy"
-    },
-    "monitoring": {
-        "data_pipeline_monitoring": "strategy",
-        "data_quality_monitoring": "strategy",
-        "performance_monitoring": "strategy"
-    }
-}"""
-            ),
-            LLMMessage(
-                role="user",
-                content=f"Design data flow for:\nSystem Architecture: {json.dumps(system_architecture, indent=2)}\nDatabase Design: {json.dumps(database_design, indent=2)}"
-            )
-        ]
+        external_systems = task.inputs.get("external_systems", [])
+        integration_requirements = task.inputs.get("integration_requirements", {})
         
-        try:
-            response = await llm_manager.complete_with_fallback(messages)
-            data_flow = json.loads(response.content)
-            
-            return {
-                "data_flow_design": data_flow,
-                "system_architecture": system_architecture,
-                "database_design": database_design,
-                "design_timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": response.tokens_used
+        # Create comprehensive integration plan
+        integration_plan = self._design_integration_architecture(external_systems, integration_requirements)
+        
+        return {
+            "integration_plan": integration_plan,
+            "integration_metadata": {
+                "created_at": datetime.utcnow().isoformat(),
+                "creator": self.agent_id
             }
-        except Exception as e:
-            self.logger.error(f"Data flow design failed: {e}")
-            raise
+        }
     
-    async def _create_adrs(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Create Architecture Decision Records"""
-        architecture_decisions = task.inputs.get("architecture_decisions", [])
-        system_architecture = task.inputs.get("system_architecture", {})
+    async def _design_deployment_architecture(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
+        """Design deployment and infrastructure architecture"""
         
-        messages = [
-            LLMMessage(
-                role="system",
-                content="""You are an architecture documentation specialist. Create comprehensive Architecture Decision Records (ADRs).
-
-For each architectural decision, create an ADR with:
-1. Title
-2. Status (Proposed/Accepted/Deprecated/Superseded)
-3. Context
-4. Decision
-5. Consequences
-6. Alternatives considered
-7. Related decisions
-
-Format as JSON:
-{
-    "adrs": [
-        {
-            "id": "ADR-001",
-            "title": "Decision title",
-            "status": "Accepted/Proposed/etc",
-            "date": "YYYY-MM-DD",
-            "context": "Background and context",
-            "decision": "What was decided",
-            "rationale": "Why this decision",
-            "consequences": {
-                "positive": ["benefits"],
-                "negative": ["drawbacks"],
-                "neutral": ["other impacts"]
+        deployment_requirements = task.inputs.get("deployment_requirements", {})
+        scalability_requirements = task.inputs.get("scalability_requirements", {})
+        
+        # Design deployment architecture
+        deployment_architecture = self._create_deployment_design(deployment_requirements, scalability_requirements)
+        
+        return {
+            "deployment_architecture": deployment_architecture,
+            "deployment_metadata": {
+                "designed_at": datetime.utcnow().isoformat(),
+                "designer": self.agent_id
+            }
+        }
+    
+    async def _create_architecture_documentation(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
+        """Create comprehensive architecture documentation"""
+        
+        architecture_components = task.inputs.get("architecture_components", {})
+        
+        # Generate documentation
+        documentation = self._generate_architecture_docs(architecture_components)
+        
+        return {
+            "documentation": documentation,
+            "documentation_metadata": {
+                "created_at": datetime.utcnow().isoformat(),
+                "creator": self.agent_id,
+                "format": "markdown"
+            }
+        }
+    
+    def _extract_key_decisions(self, architecture: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract key architectural decisions"""
+        decisions = []
+        
+        # Extract pattern decision
+        pattern = architecture.get("architecture_overview", {}).get("pattern")
+        if pattern:
+            decisions.append({
+                "decision": f"Architectural Pattern: {pattern}",
+                "rationale": "Based on scalability and team structure requirements",
+                "alternatives": ["microservices", "monolith", "serverless"],
+                "implications": ["Development complexity", "Deployment strategy", "Team organization"]
+            })
+        
+        return decisions
+    
+    def _identify_trade_offs(self, architecture: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Identify architectural trade-offs"""
+        trade_offs = []
+        
+        # Example trade-offs based on architectural choices
+        pattern = architecture.get("architecture_overview", {}).get("pattern")
+        if pattern == "microservices":
+            trade_offs.append({
+                "aspect": "Development Complexity",
+                "trade_off": "Higher development complexity for better scalability",
+                "benefits": ["Independent scaling", "Technology diversity", "Team autonomy"],
+                "costs": ["Service coordination", "Network latency", "Operational complexity"]
+            })
+        
+        return trade_offs
+    
+    def _generate_migration_scripts(self, database_design: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Generate SQL migration scripts"""
+        scripts = []
+        
+        entities = database_design.get("entities", [])
+        for entity in entities:
+            # Generate CREATE TABLE script
+            table_name = entity.get("table_name", entity.get("name"))
+            fields = entity.get("fields", [])
+            
+            create_script = f"CREATE TABLE {table_name} (\n"
+            field_definitions = []
+            
+            for field in fields:
+                field_def = f"  {field['name']} {field['type']}"
+                if not field.get("nullable", True):
+                    field_def += " NOT NULL"
+                if field.get("unique", False):
+                    field_def += " UNIQUE"
+                if field.get("default") is not None:
+                    field_def += f" DEFAULT {field['default']}"
+                field_definitions.append(field_def)
+            
+            # Add primary key
+            primary_key = entity.get("primary_key", [])
+            if primary_key:
+                field_definitions.append(f"  PRIMARY KEY ({', '.join(primary_key)})")
+            
+            create_script += ",\n".join(field_definitions) + "\n);"
+            
+            scripts.append({
+                "name": f"create_{table_name}_table",
+                "type": "CREATE TABLE",
+                "script": create_script
+            })
+        
+        return scripts
+    
+    def _generate_openapi_spec(self, api_design: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate OpenAPI 3.0 specification"""
+        
+        spec = {
+            "openapi": "3.0.0",
+            "info": {
+                "title": "API Specification",
+                "version": "1.0.0",
+                "description": "Generated API specification"
             },
-            "alternatives": [
+            "servers": [
                 {
-                    "option": "alternative",
-                    "pros": ["benefits"],
-                    "cons": ["drawbacks"],
-                    "rejected_reason": "why not chosen"
+                    "url": api_design.get("api_design", {}).get("base_url", "/api/v1"),
+                    "description": "Development server"
                 }
             ],
-            "related_decisions": ["ADR-002", "etc"],
-            "references": ["links/documents"]
-        }
-    ],
-    "decision_log": {
-        "total_decisions": "count",
-        "by_status": {
-            "accepted": "count",
-            "proposed": "count",
-            "deprecated": "count"
-        },
-        "by_category": {
-            "technology": "count",
-            "pattern": "count",
-            "process": "count"
-        }
-    }
-}"""
-            ),
-            LLMMessage(
-                role="user",
-                content=f"Create ADRs for architecture decisions in:\nSystem Architecture: {json.dumps(system_architecture, indent=2)}\nSpecific Decisions: {architecture_decisions}"
-            )
-        ]
-        
-        try:
-            response = await llm_manager.complete_with_fallback(messages)
-            adrs = json.loads(response.content)
-            
-            return {
-                "architecture_decision_records": adrs,
-                "system_architecture": system_architecture,
-                "architecture_decisions": architecture_decisions,
-                "creation_timestamp": datetime.utcnow().isoformat(),
-                "tokens_used": response.tokens_used
+            "paths": {},
+            "components": {
+                "schemas": {},
+                "securitySchemes": {
+                    "bearerAuth": {
+                        "type": "http",
+                        "scheme": "bearer",
+                        "bearerFormat": "JWT"
+                    }
+                }
             }
-        except Exception as e:
-            self.logger.error(f"ADR creation failed: {e}")
-            raise
+        }
+        
+        # Add endpoints to paths
+        endpoints = api_design.get("endpoints", [])
+        for endpoint in endpoints:
+            path = endpoint.get("path", "")
+            method = endpoint.get("method", "GET").lower()
+            
+            if path not in spec["paths"]:
+                spec["paths"][path] = {}
+            
+            spec["paths"][path][method] = {
+                "summary": endpoint.get("summary", ""),
+                "description": endpoint.get("description", ""),
+                "responses": {
+                    str(code): {"description": desc} 
+                    for code, desc in endpoint.get("responses", {}).items()
+                }
+            }
+            
+            if endpoint.get("authentication_required", False):
+                spec["paths"][path][method]["security"] = [{"bearerAuth": []}]
+        
+        # Add schemas
+        schemas = api_design.get("schemas", [])
+        for schema in schemas:
+            spec["components"]["schemas"][schema["name"]] = {
+                "type": schema.get("type", "object"),
+                "properties": schema.get("properties", {}),
+                "required": schema.get("required", [])
+            }
+        
+        return spec
+    
+    def _design_integration_architecture(self, external_systems: List, integration_requirements: Dict) -> Dict:
+        """Design integration architecture"""
+        return {
+            "integration_patterns": ["API Gateway", "Message Queue", "Event Streaming"],
+            "external_systems": external_systems,
+            "integration_points": [],
+            "data_synchronization": "event-driven",
+            "error_handling": "retry with exponential backoff"
+        }
+    
+    def _create_deployment_design(self, deployment_requirements: Dict, scalability_requirements: Dict) -> Dict:
+        """Create deployment architecture design"""
+        return {
+            "deployment_model": "containerized",
+            "orchestration": "Kubernetes",
+            "scaling_strategy": "horizontal auto-scaling",
+            "environments": ["development", "staging", "production"],
+            "infrastructure": "cloud-native"
+        }
+    
+    def _generate_architecture_docs(self, architecture_components: Dict) -> Dict:
+        """Generate architecture documentation"""
+        return {
+            "overview": "System architecture overview",
+            "components": "Detailed component descriptions",
+            "deployment": "Deployment architecture guide",
+            "security": "Security architecture documentation",
+            "integration": "Integration patterns and guidelines"
+        }

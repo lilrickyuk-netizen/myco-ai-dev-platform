@@ -248,7 +248,7 @@ export class EnhancedDockerManager extends EventEmitter {
         ReadonlyRootfs: true,
         SecurityOpt: [
           'no-new-privileges:true',
-          'seccomp:unconfined' // TODO: Create custom seccomp profile
+          'seccomp:default' // Use default seccomp profile for security
         ],
         CapDrop: ['ALL'],
         CapAdd: ['SETUID', 'SETGID'], // Minimal capabilities

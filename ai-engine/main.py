@@ -5,7 +5,7 @@ AI Engine - FastAPI-based service for LLM orchestration and AI capabilities
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from contextlib import asynccontextmanager
 import uvicorn
 import logging
@@ -17,10 +17,10 @@ import time
 from .core.config import settings
 from .core.logging import setup_logging
 from .api.routes import generation, models, agents, health
-from .services.llm_manager import LLMManager
-from .services.agent_manager import AgentManager
-from .services.vector_store import VectorStoreManager
-from .services.cache_manager import CacheManager
+from .services.agent_manager import agent_manager
+from .services.vector_store import vector_store_manager
+from .services.cache_manager import cache_manager
+from .services.llm_manager import llm_manager
 from .middleware.auth import AuthMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.monitoring import MonitoringMiddleware
@@ -29,11 +29,7 @@ from .middleware.monitoring import MonitoringMiddleware
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Global managers
-llm_manager = LLMManager()
-agent_manager = AgentManager()
-vector_store_manager = VectorStoreManager()
-cache_manager = CacheManager()
+# Managers are imported from their modules
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

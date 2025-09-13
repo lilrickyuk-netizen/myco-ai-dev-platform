@@ -470,38 +470,315 @@ Format as JSON:
         requirements = task.inputs.get("requirements", {})
         domain_model = task.inputs.get("domain_model", {})
         
-        # Implementation similar to other methods
-        return {
-            "business_logic": "implemented",
-            "implementation_timestamp": datetime.utcnow().isoformat()
+        messages = [
+            LLMMessage(
+                role="system",
+                content="""You are a business logic expert. Implement comprehensive business logic for the application.
+
+Generate:
+1. Service layer implementations
+2. Business rule validations
+3. Domain logic operations
+4. Data transformation utilities
+5. Business process workflows
+6. Error handling for business rules
+7. Event handling and notifications
+8. Business metrics and analytics
+
+Use clean architecture patterns and domain-driven design principles.
+
+Format as JSON:
+{
+    "services": [
+        {
+            "name": "service_name",
+            "path": "services/service.ts",
+            "content": "complete service implementation",
+            "description": "service purpose"
         }
+    ],
+    "validators": [
+        {
+            "name": "validator_name",
+            "path": "validators/validator.ts",
+            "content": "validation logic"
+        }
+    ],
+    "workflows": [
+        {
+            "name": "workflow_name",
+            "path": "workflows/workflow.ts",
+            "content": "workflow implementation"
+        }
+    ],
+    "utils": [
+        {
+            "name": "utility_name",
+            "path": "utils/utility.ts",
+            "content": "utility functions"
+        }
+    ]
+}"""
+            ),
+            LLMMessage(
+                role="user",
+                content=f"Implement business logic:\nRequirements: {json.dumps(requirements, indent=2)}\nDomain Model: {json.dumps(domain_model, indent=2)}"
+            )
+        ]
+        
+        try:
+            response = await llm_manager.complete_with_fallback(messages)
+            business_logic = json.loads(response.content)
+            
+            return {
+                "business_logic": business_logic,
+                "requirements": requirements,
+                "domain_model": domain_model,
+                "implementation_timestamp": datetime.utcnow().isoformat(),
+                "tokens_used": response.tokens_used
+            }
+        except Exception as e:
+            self.logger.error(f"Business logic implementation failed: {e}")
+            raise
     
     async def _implement_integrations(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
         """Implement external integrations"""
         integration_requirements = task.inputs.get("integration_requirements", {})
         
-        # Implementation for external service integrations
-        return {
-            "integrations": "implemented",
-            "implementation_timestamp": datetime.utcnow().isoformat()
+        messages = [
+            LLMMessage(
+                role="system",
+                content="""You are an integration specialist. Implement external service integrations.
+
+Generate:
+1. API client implementations
+2. Webhook handlers
+3. Message queue integrations
+4. Third-party service adapters
+5. Data synchronization services
+6. Authentication with external services
+7. Error handling and retry logic
+8. Integration monitoring and logging
+
+Use best practices for external integrations including circuit breakers, retries, and fallbacks.
+
+Format as JSON:
+{
+    "integrations": [
+        {
+            "name": "integration_name",
+            "service": "external_service",
+            "path": "integrations/service.ts",
+            "content": "integration implementation",
+            "config": {"api_key": "required", "base_url": "url"}
         }
+    ],
+    "webhooks": [
+        {
+            "name": "webhook_handler",
+            "path": "webhooks/handler.ts",
+            "content": "webhook handling logic"
+        }
+    ],
+    "queue_handlers": [
+        {
+            "name": "queue_handler",
+            "path": "queues/handler.ts",
+            "content": "message queue processing"
+        }
+    ],
+    "monitoring": [
+        {
+            "name": "integration_monitor",
+            "path": "monitoring/integrations.ts",
+            "content": "integration health monitoring"
+        }
+    ]
+}"""
+            ),
+            LLMMessage(
+                role="user",
+                content=f"Implement external integrations:\nRequirements: {json.dumps(integration_requirements, indent=2)}"
+            )
+        ]
+        
+        try:
+            response = await llm_manager.complete_with_fallback(messages)
+            integrations = json.loads(response.content)
+            
+            return {
+                "integrations": integrations,
+                "integration_requirements": integration_requirements,
+                "implementation_timestamp": datetime.utcnow().isoformat(),
+                "tokens_used": response.tokens_used
+            }
+        except Exception as e:
+            self.logger.error(f"Integration implementation failed: {e}")
+            raise
     
     async def _optimize_performance(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
         """Optimize backend performance"""
         performance_requirements = task.inputs.get("performance_requirements", {})
+        current_metrics = task.inputs.get("current_metrics", {})
         
-        # Implementation for performance optimizations
-        return {
-            "optimizations": "implemented",
-            "implementation_timestamp": datetime.utcnow().isoformat()
+        messages = [
+            LLMMessage(
+                role="system",
+                content="""You are a performance optimization expert. Implement performance optimizations for the backend.
+
+Generate:
+1. Database query optimizations
+2. Caching strategies and implementations
+3. Connection pooling configurations
+4. Background job processors
+5. API response compression
+6. Memory usage optimizations
+7. CPU utilization improvements
+8. I/O optimization techniques
+9. Monitoring and profiling tools
+10. Load balancing configurations
+
+Focus on measurable performance improvements.
+
+Format as JSON:
+{
+    "optimizations": [
+        {
+            "type": "database",
+            "name": "optimization_name",
+            "path": "optimizations/database.ts",
+            "content": "optimization implementation",
+            "expected_improvement": "50% query time reduction"
         }
+    ],
+    "caching": [
+        {
+            "name": "cache_strategy",
+            "path": "cache/strategy.ts",
+            "content": "caching implementation",
+            "cache_type": "redis"
+        }
+    ],
+    "monitoring": [
+        {
+            "name": "performance_monitor",
+            "path": "monitoring/performance.ts",
+            "content": "performance monitoring setup"
+        }
+    ],
+    "configurations": [
+        {
+            "name": "pool_config",
+            "path": "config/pools.ts",
+            "content": "connection pool configurations"
+        }
+    ]
+}"""
+            ),
+            LLMMessage(
+                role="user",
+                content=f"Optimize backend performance:\nRequirements: {json.dumps(performance_requirements, indent=2)}\nCurrent Metrics: {json.dumps(current_metrics, indent=2)}"
+            )
+        ]
+        
+        try:
+            response = await llm_manager.complete_with_fallback(messages)
+            optimizations = json.loads(response.content)
+            
+            return {
+                "optimizations": optimizations,
+                "performance_requirements": performance_requirements,
+                "current_metrics": current_metrics,
+                "implementation_timestamp": datetime.utcnow().isoformat(),
+                "tokens_used": response.tokens_used
+            }
+        except Exception as e:
+            self.logger.error(f"Performance optimization failed: {e}")
+            raise
     
     async def _implement_backend_tests(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
         """Implement comprehensive backend tests"""
         test_requirements = task.inputs.get("test_requirements", {})
+        api_endpoints = task.inputs.get("api_endpoints", [])
+        services = task.inputs.get("services", [])
         
-        # Implementation for comprehensive testing
-        return {
-            "tests": "implemented",
-            "implementation_timestamp": datetime.utcnow().isoformat()
+        messages = [
+            LLMMessage(
+                role="system",
+                content="""You are a testing expert. Implement comprehensive backend tests.
+
+Generate:
+1. Unit tests for all services and utilities
+2. Integration tests for API endpoints
+3. Database integration tests
+4. Authentication and authorization tests
+5. Performance tests
+6. Security tests
+7. End-to-end workflow tests
+8. Mock implementations for external services
+9. Test fixtures and factories
+10. Test configuration and setup
+
+Use testing best practices including test isolation, data factories, and proper assertions.
+
+Format as JSON:
+{
+    "unit_tests": [
+        {
+            "name": "test_name",
+            "path": "tests/unit/service.test.ts",
+            "content": "unit test implementation",
+            "coverage_target": "90%"
         }
+    ],
+    "integration_tests": [
+        {
+            "name": "api_test",
+            "path": "tests/integration/api.test.ts",
+            "content": "integration test implementation"
+        }
+    ],
+    "e2e_tests": [
+        {
+            "name": "workflow_test",
+            "path": "tests/e2e/workflow.test.ts",
+            "content": "end-to-end test implementation"
+        }
+    ],
+    "test_utilities": [
+        {
+            "name": "test_helpers",
+            "path": "tests/helpers/helpers.ts",
+            "content": "test utility functions"
+        }
+    ],
+    "fixtures": [
+        {
+            "name": "data_fixtures",
+            "path": "tests/fixtures/data.ts",
+            "content": "test data fixtures"
+        }
+    ]
+}"""
+            ),
+            LLMMessage(
+                role="user",
+                content=f"Implement comprehensive backend tests:\nTest Requirements: {json.dumps(test_requirements, indent=2)}\nAPI Endpoints: {json.dumps(api_endpoints, indent=2)}\nServices: {json.dumps(services, indent=2)}"
+            )
+        ]
+        
+        try:
+            response = await llm_manager.complete_with_fallback(messages)
+            tests = json.loads(response.content)
+            
+            return {
+                "tests": tests,
+                "test_requirements": test_requirements,
+                "api_endpoints": api_endpoints,
+                "services": services,
+                "implementation_timestamp": datetime.utcnow().isoformat(),
+                "tokens_used": response.tokens_used
+            }
+        except Exception as e:
+            self.logger.error(f"Backend test implementation failed: {e}")
+            raise
