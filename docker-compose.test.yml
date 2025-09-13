@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # Test Database Services
+  postgres-test:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: myco_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Backend Service for Testing
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@postgres-test:5432/myco_test
+      REDIS_URL: redis://redis-test:6379/0
+      JWT_SECRET: test-secret-key
+      CLERK_SECRET_KEY: test-clerk-secret
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    command: npm run test
+
+  # AI Engine for Testing
+  ai-engine-test:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres-test:5432/myco_test
+      REDIS_URL: redis://redis-test:6379/1
+      ENABLE_MOCK_RESPONSES: true
+      JWT_SECRET_KEY: test-secret-key
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+
+  # Execution Engine for Testing
+  execution-engine-test:
+    build:
+      context: ./execution-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8001"
+    environment:
+      REDIS_URL: redis://redis-test:6379/2
+      DOCKER_SOCKET: /var/run/docker.sock
+    depends_on:
+      redis-test:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true
+
+  # Frontend for Testing
+  frontend-test:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5174:5173"
+    environment:
+      VITE_API_URL: http://backend-test:3000
+      VITE_AI_ENGINE_URL: http://ai-engine-test:8000
+      CLERK_PUBLISHABLE_KEY: pk_test_example
+    depends_on:
+      - backend-test
+
+volumes:
+  postgres_test_data:
+  redis_test_data:

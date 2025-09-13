@@ -2,134 +2,82 @@
 Health check routes for the AI Engine
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from typing import Dict, Any
 import time
-import asyncio
+import os
 
 from ...services.llm_manager import llm_manager
 from ...services.agent_manager import agent_manager
-from ...services.vector_store import vector_store_manager
 from ...services.cache_manager import cache_manager
+from ...services.vector_store import vector_store_manager
 from ...core.config import settings
 
 router = APIRouter()
 
-@router.get("/ping")
-async def ping():
-    """Simple ping endpoint"""
+@router.get("/")
+async def health_check() -> Dict[str, Any]:
+    """Main health check endpoint"""
+    
+    # Check all services
+    llm_health = await llm_manager.health_check()
+    agent_health = await agent_manager.health_check()
+    cache_health = await cache_manager.health_check()
+    vector_health = await vector_store_manager.health_check()
+    
+    # Determine overall health
+    all_healthy = all([
+        all(service.get("status") == "healthy" for service in llm_health.values()),
+        agent_health.get("status") == "healthy",
+        cache_health.get("status") == "healthy",
+        vector_health.get("embedding_provider") == "healthy"
+    ])
+    
     return {
-        "message": "pong", 
+        "status": "healthy" if all_healthy else "unhealthy",
         "timestamp": time.time(),
-        "service": "ai-engine"
+        "version": "1.0.0",
+        "services": {
+            "llm_providers": llm_health,
+            "agent_manager": agent_health,
+            "cache": cache_health,
+            "vector_store": vector_health
+        },
+        "environment": {
+            "debug": settings.DEBUG,
+            "workers": settings.WORKERS,
+            "max_concurrent": settings.MAX_CONCURRENT_REQUESTS
+        }
     }
 
-@router.get("/health")
-async def health_check():
-    """Comprehensive health check"""
-    
-    health_status = {
-        "status": "healthy",
-        "timestamp": time.time(),
-        "service": "ai-engine",
-        "version": "1.0.0",
-        "components": {}
-    }
-    
-    # Check LLM Manager
-    try:
-        llm_health = await llm_manager.health_check()
-        health_status["components"]["llm_manager"] = {
-            "status": "healthy",
-            "providers": llm_health
-        }
-    except Exception as e:
-        health_status["components"]["llm_manager"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-        health_status["status"] = "unhealthy"
-    
-    # Check Agent Manager
-    try:
-        agent_health = await agent_manager.health_check()
-        health_status["components"]["agent_manager"] = {
-            "status": "healthy",
-            "agents": agent_health
-        }
-    except Exception as e:
-        health_status["components"]["agent_manager"] = {
-            "status": "unhealthy", 
-            "error": str(e)
-        }
-        health_status["status"] = "unhealthy"
-    
-    # Check Vector Store
-    try:
-        vector_health = await vector_store_manager.health_check()
-        health_status["components"]["vector_store"] = {
-            "status": "healthy",
-            "details": vector_health
-        }
-    except Exception as e:
-        health_status["components"]["vector_store"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-        health_status["status"] = "unhealthy"
-    
-    # Check Cache Manager
-    try:
-        cache_health = await cache_manager.health_check()
-        health_status["components"]["cache_manager"] = {
-            "status": "healthy",
-            "details": cache_health
-        }
-    except Exception as e:
-        health_status["components"]["cache_manager"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-        health_status["status"] = "unhealthy"
-    
-    return health_status
+@router.get("/ping")
+async def ping() -> Dict[str, str]:
+    """Simple ping endpoint"""
+    return {"message": "pong", "timestamp": str(time.time())}
 
 @router.get("/ready")
-async def readiness_check():
-    """Readiness check for Kubernetes"""
-    
-    # Check if all critical components are ready
+async def readiness_check() -> Dict[str, Any]:
+    """Kubernetes readiness probe"""
     try:
-        # Quick LLM test
-        await asyncio.wait_for(
-            llm_manager.generate("test", max_tokens=1),
-            timeout=10.0
-        )
+        # Check if essential services are ready
+        cache_ready = await cache_manager.health_check()
         
         return {
-            "status": "ready",
+            "ready": cache_ready.get("status") == "healthy",
             "timestamp": time.time()
         }
     except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Service not ready: {str(e)}"
-        )
+        return {
+            "ready": False,
+            "error": str(e),
+            "timestamp": time.time()
+        }
 
-@router.get("/metrics")
-async def get_metrics():
-    """Get service metrics"""
-    
+@router.get("/live")
+async def liveness_check() -> Dict[str, Any]:
+    """Kubernetes liveness probe"""
     return {
-        "timestamp": time.time(),
-        "uptime": time.time() - getattr(get_metrics, '_start_time', time.time()),
-        "requests_total": getattr(get_metrics, '_requests', 0),
-        "errors_total": getattr(get_metrics, '_errors', 0),
-        "llm_providers": len(llm_manager.get_available_providers()),
-        "active_agents": len(await agent_manager.get_active_sessions()),
+        "alive": True,
+        "uptime": time.time(),
+        "process_id": os.getpid()
     }
-
-# Initialize metrics tracking
-get_metrics._start_time = time.time()
-get_metrics._requests = 0
-get_metrics._errors = 0

@@ -1,200 +1,168 @@
 """
-Authentication middleware for AI Engine
+Authentication middleware for the AI Engine
 """
 
-from fastapi import HTTPException, Depends, status
+import logging
+from typing import Optional, Dict, Any
+from fastapi import HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette.middleware.base import BaseHTTPMiddleware
 import jwt
 import time
-from typing import Optional, Dict, Any
 
 from ..core.config import settings
 
-security = HTTPBearer()
+logger = logging.getLogger(__name__)
 
-class AuthMiddleware:
+security = HTTPBearer(auto_error=False)
+
+class AuthMiddleware(BaseHTTPMiddleware):
     """Authentication middleware"""
     
-    def __init__(self):
-        self.jwt_secret = settings.JWT_SECRET_KEY
-        self.jwt_algorithm = settings.JWT_ALGORITHM
-    
-    def verify_token(self, token: str) -> Dict[str, Any]:
-        """Verify JWT token and return payload"""
+    async def dispatch(self, request: Request, call_next):
+        # Skip auth for health endpoints and docs
+        if request.url.path in ["/health", "/health/ping", "/health/live", "/health/ready", "/docs", "/redoc", "/openapi.json"]:
+            return await call_next(request)
+        
+        # In development mode, skip auth if disabled
+        if not settings.ENABLE_AUTH and settings.DEBUG:
+            # Add a fake user for development
+            request.state.user = {
+                "user_id": "dev-user",
+                "email": "dev@example.com",
+                "name": "Development User"
+            }
+            return await call_next(request)
+        
+        # Check for API key authentication first
+        api_key = request.headers.get("X-API-Key")
+        if api_key and api_key in settings.ALLOWED_API_KEYS:
+            request.state.user = {
+                "user_id": f"api-key-{api_key[:8]}",
+                "api_key": True
+            }
+            return await call_next(request)
+        
+        # Check for JWT token
+        auth_header = request.headers.get("authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        
+        token = auth_header.split(" ")[1]
         try:
-            payload = jwt.decode(
-                token, 
-                self.jwt_secret, 
-                algorithms=[self.jwt_algorithm]
-            )
-            
-            # Check expiration
-            if payload.get("exp", 0) < time.time():
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token expired"
-                )
-            
-            return payload
-        except jwt.InvalidTokenError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token"
-            )
-    
-    def verify_api_key(self, api_key: str) -> bool:
-        """Verify API key"""
-        if not settings.ENABLE_AUTH:
-            return True
+            user = await verify_jwt_token(token)
+            request.state.user = user
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Authentication error: {e}")
+            raise HTTPException(status_code=401, detail="Authentication failed")
         
-        # Check against allowed API keys
-        if settings.ALLOWED_API_KEYS and api_key in settings.ALLOWED_API_KEYS:
-            return True
-        
-        # For development, allow a default key
-        if settings.DEBUG and api_key == "dev-key":
-            return True
-        
-        return False
+        return await call_next(request)
 
-auth_middleware = AuthMiddleware()
+async def verify_jwt_token(token: str) -> Dict[str, Any]:
+    """Verify JWT token and return user info"""
+    
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+        
+        # Check expiration
+        exp = payload.get("exp")
+        if exp and exp < time.time():
+            raise HTTPException(status_code=401, detail="Token expired")
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing user ID")
+        
+        return {
+            "user_id": user_id,
+            "email": payload.get("email"),
+            "name": payload.get("name"),
+            "roles": payload.get("roles", []),
+            "exp": exp
+        }
+    
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
     """Get current authenticated user"""
     
-    if not settings.ENABLE_AUTH:
-        # Return mock user for development
+    # If user is already set by middleware, return it
+    if hasattr(request.state, "user"):
+        return request.state.user
+    
+    # In development mode, return a fake user if auth is disabled
+    if not settings.ENABLE_AUTH and settings.DEBUG:
         return {
             "user_id": "dev-user",
             "email": "dev@example.com",
-            "is_authenticated": True
+            "name": "Development User"
         }
     
-    token = credentials.credentials
-    
-    # Check if it's an API key format (simple string) or JWT
-    if token.startswith("sk-") or token == "dev-key":
-        # API key authentication
-        if auth_middleware.verify_api_key(token):
-            return {
-                "user_id": f"api-key-user-{hash(token) % 10000}",
-                "email": "api@example.com",
-                "is_authenticated": True,
-                "auth_type": "api_key"
-            }
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid API key"
-            )
-    else:
-        # JWT authentication
-        payload = auth_middleware.verify_token(token)
+    # Check for API key in headers
+    api_key = request.headers.get("X-API-Key")
+    if api_key and api_key in settings.ALLOWED_API_KEYS:
         return {
-            "user_id": payload.get("sub", "unknown"),
-            "email": payload.get("email", "unknown@example.com"),
-            "is_authenticated": True,
-            "auth_type": "jwt",
-            "payload": payload
+            "user_id": f"api-key-{api_key[:8]}",
+            "api_key": True
         }
+    
+    # Require JWT token
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    return await verify_jwt_token(credentials.credentials)
 
 async def get_optional_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Optional[Dict[str, Any]]:
-    """Get current user if authenticated, otherwise None"""
-    
-    if not credentials:
-        return None
+    """Get current user if authenticated, otherwise return None"""
     
     try:
-        return await get_current_user(credentials)
+        return await get_current_user(request, credentials)
     except HTTPException:
         return None
 
-def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    """Require admin privileges"""
+def require_roles(required_roles: list):
+    """Decorator to require specific roles"""
     
-    # Check if user has admin role
-    if current_user.get("auth_type") == "api_key":
-        # API key users have admin access
-        return current_user
-    
-    # Check JWT payload for admin role
-    payload = current_user.get("payload", {})
-    roles = payload.get("roles", [])
-    
-    if "admin" not in roles and not current_user.get("is_admin", False):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required"
-        )
-    
-    return current_user
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            # Get current user from kwargs
+            current_user = kwargs.get("current_user")
+            if not current_user:
+                raise HTTPException(status_code=401, detail="Authentication required")
+            
+            user_roles = current_user.get("roles", [])
+            if not any(role in user_roles for role in required_roles):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+            
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
 
-class RateLimitedAuth:
-    """Rate-limited authentication to prevent brute force attacks"""
+def create_jwt_token(user_data: Dict[str, Any]) -> str:
+    """Create a JWT token for a user"""
     
-    def __init__(self):
-        self.failed_attempts: Dict[str, list] = {}
-        self.max_attempts = 10
-        self.window_size = 300  # 5 minutes
-    
-    def is_rate_limited(self, identifier: str) -> bool:
-        """Check if identifier is rate limited"""
-        now = time.time()
-        
-        if identifier not in self.failed_attempts:
-            return False
-        
-        # Clean old attempts
-        self.failed_attempts[identifier] = [
-            attempt_time for attempt_time in self.failed_attempts[identifier]
-            if now - attempt_time < self.window_size
-        ]
-        
-        # Check if over limit
-        return len(self.failed_attempts[identifier]) >= self.max_attempts
-    
-    def record_failed_attempt(self, identifier: str):
-        """Record a failed authentication attempt"""
-        now = time.time()
-        
-        if identifier not in self.failed_attempts:
-            self.failed_attempts[identifier] = []
-        
-        self.failed_attempts[identifier].append(now)
-
-rate_limited_auth = RateLimitedAuth()
-
-async def rate_limited_get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> Dict[str, Any]:
-    """Get current user with rate limiting"""
-    
-    # Use IP address as identifier (in production, get from request)
-    identifier = "default-ip"  # This would be extracted from request.client.host
-    
-    if rate_limited_auth.is_rate_limited(identifier):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed authentication attempts. Try again later."
-        )
-    
-    try:
-        return await get_current_user(credentials)
-    except HTTPException as e:
-        if e.status_code == status.HTTP_401_UNAUTHORIZED:
-            rate_limited_auth.record_failed_attempt(identifier)
-        raise
-
-# Mock authentication for development
-async def mock_auth() -> Dict[str, Any]:
-    """Mock authentication for testing"""
-    return {
-        "user_id": "mock-user-123",
-        "email": "mock@example.com",
-        "is_authenticated": True,
-        "auth_type": "mock"
+    payload = {
+        "sub": user_data["user_id"],
+        "email": user_data.get("email"),
+        "name": user_data.get("name"),
+        "roles": user_data.get("roles", []),
+        "iat": int(time.time()),
+        "exp": int(time.time()) + (settings.JWT_EXPIRATION_HOURS * 3600)
     }
+    
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)

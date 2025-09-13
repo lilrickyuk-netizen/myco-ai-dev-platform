@@ -66,7 +66,7 @@ services:
   # Backend Services
   backend:
     build:
-      context: ./backend
+      context: ../backend
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
@@ -75,6 +75,10 @@ services:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/myco_platform
       REDIS_URL: redis://redis:6379/0
       MONGODB_URL: mongodb://admin:password@mongodb:27017/myco_platform?authSource=admin
+      JWT_SECRET: dev-secret-key-change-in-production
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      AI_ENGINE_URL: http://ai-engine:8000
+      EXECUTION_ENGINE_URL: http://execution-engine:8001
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,14 +87,19 @@ services:
       mongodb:
         condition: service_healthy
     volumes:
-      - ./backend:/app
+      - ../backend:/app
       - /app/node_modules
     command: npm run dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # AI Engine
   ai-engine:
     build:
-      context: ./ai-engine
+      context: ../ai-engine
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
@@ -103,6 +112,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      COHERE_API_KEY: ${COHERE_API_KEY}
+      JWT_SECRET_KEY: dev-secret-key-change-in-production
+      ENABLE_AUTH: false
+      DEBUG: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -113,27 +126,38 @@ services:
       weaviate:
         condition: service_started
     volumes:
-      - ./ai-engine:/app
+      - ../ai-engine:/app
       - ai_engine_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Execution Engine
   execution-engine:
     build:
-      context: ./execution-engine
+      context: ../execution-engine
       dockerfile: Dockerfile
     ports:
       - "8001:8001"
     environment:
       REDIS_URL: redis://redis:6379/2
       DOCKER_SOCKET: /var/run/docker.sock
+      NODE_ENV: development
     depends_on:
       redis:
         condition: service_healthy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./execution-engine:/app
+      - ../execution-engine:/app
       - execution_data:/app/data
     privileged: true
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Local LLM (Ollama)
   ollama:
@@ -153,7 +177,7 @@ services:
   # Frontend
   frontend:
     build:
-      context: ./frontend
+      context: ../frontend
       dockerfile: Dockerfile
     ports:
       - "5173:5173"
@@ -161,12 +185,22 @@ services:
       VITE_API_URL: http://localhost:3000
       VITE_AI_ENGINE_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:3000
+      VITE_EXECUTION_ENGINE_URL: http://localhost:8001
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      ai-engine:
+        condition: service_healthy
     volumes:
-      - ./frontend:/app
+      - ../frontend:/app
       - /app/node_modules
     command: npm run dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Monitoring Stack
   prometheus:

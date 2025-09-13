@@ -1,461 +1,449 @@
 import { EventEmitter } from 'events';
-import { EnhancedDockerManager, JobConfig, JobResult } from './containers/enhanced_docker_manager';
+import { DockerManager, ContainerConfig, ExecutionResult } from './containers/DockerManager';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 
-export interface ExecutionRequest {
-  id?: string;
-  userId: string;
-  projectId?: string;
-  code: string;
+export interface JobConfig {
   language: string;
-  framework?: string;
+  code: string;
+  input?: string;
   timeout?: number;
   memoryLimit?: string;
   cpuLimit?: number;
   environment?: Record<string, string>;
-  inputFiles?: Array<{ path: string; content: string }>;
-  expectedOutputs?: string[];
-  sandboxed?: boolean;
+  dependencies?: string[];
+  tests?: string[];
 }
 
-export interface ExecutionMetrics {
-  totalExecutions: number;
-  successfulExecutions: number;
-  failedExecutions: number;
-  averageExecutionTime: number;
-  languageUsage: Record<string, number>;
-  userUsage: Record<string, number>;
+export interface JobResult {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'timeout';
+  output?: string;
+  error?: string;
+  exitCode?: number;
+  duration?: number;
+  memoryUsage?: number;
+  cpuUsage?: number;
+  logs?: string;
+  createdAt: Date;
+  startedAt?: Date;
+  completedAt?: Date;
 }
 
-export interface SecurityPolicy {
-  allowedLanguages: string[];
-  maxExecutionTime: number;
-  maxMemoryUsage: string;
-  maxConcurrentJobs: number;
-  allowNetworkAccess: boolean;
-  allowFileSystemAccess: boolean;
-  blockedPackages: string[];
-  rateLimits: {
-    perUser: number;
-    perProject: number;
-    timeWindow: number; // in seconds
-  };
+export interface LanguageConfig {
+  image: string;
+  fileExtension: string;
+  compileCommand?: string[];
+  runCommand: string[];
+  dependencies?: Record<string, string[]>;
+  basePackages?: string[];
 }
 
 export class ExecutionService extends EventEmitter {
-  private dockerManager: EnhancedDockerManager;
-  private executions: Map<string, JobResult> = new Map();
-  private metrics: ExecutionMetrics = {
-    totalExecutions: 0,
-    successfulExecutions: 0,
-    failedExecutions: 0,
-    averageExecutionTime: 0,
-    languageUsage: {},
-    userUsage: {}
-  };
-  
-  private securityPolicy: SecurityPolicy = {
-    allowedLanguages: ['javascript', 'typescript', 'python', 'go', 'rust', 'java', 'cpp'],
-    maxExecutionTime: 30, // seconds
-    maxMemoryUsage: '512m',
-    maxConcurrentJobs: 10,
-    allowNetworkAccess: false,
-    allowFileSystemAccess: true,
-    blockedPackages: ['os', 'subprocess', 'exec', 'eval'],
-    rateLimits: {
-      perUser: 100,
-      perProject: 500,
-      timeWindow: 3600 // 1 hour
-    }
-  };
+  private dockerManager: DockerManager;
+  private jobs: Map<string, JobResult> = new Map();
+  private activeJobs: Set<string> = new Set();
+  private maxConcurrentJobs: number;
+  private jobQueue: Array<{ jobId: string; config: JobConfig }> = [];
+  private isProcessingQueue = false;
 
-  private rateLimitTracking: Map<string, Array<number>> = new Map();
+  private languageConfigs: Map<string, LanguageConfig> = new Map([
+    ['javascript', {
+      image: 'node:18-alpine',
+      fileExtension: 'js',
+      runCommand: ['node', 'main.js'],
+      dependencies: {
+        'express': ['npm', 'install', 'express'],
+        'lodash': ['npm', 'install', 'lodash'],
+        'axios': ['npm', 'install', 'axios']
+      },
+      basePackages: ['npm', 'install', 'typescript', '@types/node']
+    }],
+    ['typescript', {
+      image: 'node:18-alpine',
+      fileExtension: 'ts',
+      compileCommand: ['npx', 'tsc', 'main.ts'],
+      runCommand: ['node', 'main.js'],
+      dependencies: {
+        'express': ['npm', 'install', 'express', '@types/express'],
+        'lodash': ['npm', 'install', 'lodash', '@types/lodash']
+      },
+      basePackages: ['npm', 'install', 'typescript', '@types/node']
+    }],
+    ['python', {
+      image: 'python:3.11-alpine',
+      fileExtension: 'py',
+      runCommand: ['python', 'main.py'],
+      dependencies: {
+        'requests': ['pip', 'install', 'requests'],
+        'numpy': ['pip', 'install', 'numpy'],
+        'pandas': ['pip', 'install', 'pandas'],
+        'flask': ['pip', 'install', 'flask']
+      }
+    }],
+    ['java', {
+      image: 'openjdk:17-alpine',
+      fileExtension: 'java',
+      compileCommand: ['javac', 'Main.java'],
+      runCommand: ['java', 'Main'],
+      dependencies: {}
+    }],
+    ['cpp', {
+      image: 'gcc:alpine',
+      fileExtension: 'cpp',
+      compileCommand: ['g++', '-o', 'main', 'main.cpp'],
+      runCommand: ['./main'],
+      dependencies: {}
+    }],
+    ['rust', {
+      image: 'rust:alpine',
+      fileExtension: 'rs',
+      compileCommand: ['rustc', 'main.rs'],
+      runCommand: ['./main'],
+      dependencies: {}
+    }],
+    ['go', {
+      image: 'golang:alpine',
+      fileExtension: 'go',
+      compileCommand: ['go', 'build', '-o', 'main', 'main.go'],
+      runCommand: ['./main'],
+      dependencies: {}
+    }]
+  ]);
 
-  constructor() {
+  constructor(maxConcurrentJobs: number = 5) {
     super();
-    this.dockerManager = new EnhancedDockerManager();
-    this.setupEventHandlers();
-    this.startCleanupProcess();
+    this.dockerManager = new DockerManager();
+    this.maxConcurrentJobs = maxConcurrentJobs;
+    
+    // Set up cleanup on process exit
+    process.on('SIGINT', () => this.cleanup());
+    process.on('SIGTERM', () => this.cleanup());
   }
 
-  private setupEventHandlers(): void {
-    this.dockerManager.on('jobComplete', (result: JobResult) => {
-      this.handleJobComplete(result);
-    });
-
-    this.dockerManager.on('jobError', (error: any, jobId: string) => {
-      this.handleJobError(error, jobId);
-    });
-  }
-
-  private handleJobComplete(result: JobResult): void {
-    // Store result
-    this.executions.set(result.id, result);
-    
-    // Update metrics
-    this.updateMetrics(result);
-    
-    // Emit completion event
-    this.emit('executionComplete', result);
-    
-    // Clean up old results after 1 hour
-    setTimeout(() => {
-      this.executions.delete(result.id);
-    }, 3600000);
-  }
-
-  private handleJobError(error: any, jobId: string): void {
-    const errorResult: JobResult = {
-      id: jobId,
-      status: 'error',
-      output: '',
-      error: error.message || 'Unknown error',
-      exitCode: 1,
-      duration: 0
-    };
-    
-    this.handleJobComplete(errorResult);
-  }
-
-  private updateMetrics(result: JobResult): void {
-    this.metrics.totalExecutions++;
-    
-    if (result.status === 'success') {
-      this.metrics.successfulExecutions++;
-    } else {
-      this.metrics.failedExecutions++;
+  async initialize(): Promise<void> {
+    // Check if Docker is available
+    const dockerAvailable = await this.dockerManager.isDockerAvailable();
+    if (!dockerAvailable) {
+      throw new Error('Docker is not available. Please ensure Docker is installed and running.');
     }
-    
-    // Update average execution time
-    const totalTime = this.metrics.averageExecutionTime * (this.metrics.totalExecutions - 1) + result.duration;
-    this.metrics.averageExecutionTime = totalTime / this.metrics.totalExecutions;
+
+    // Pre-pull common images
+    await this.prepareEnvironment();
   }
 
-  private startCleanupProcess(): void {
-    // Clean up old rate limit tracking every hour
-    setInterval(() => {
-      const now = Date.now();
-      const windowMs = this.securityPolicy.rateLimits.timeWindow * 1000;
+  private async prepareEnvironment(): Promise<void> {
+    const images = Array.from(this.languageConfigs.values()).map(config => config.image);
+    const uniqueImages = [...new Set(images)];
+
+    for (const image of uniqueImages) {
+      try {
+        console.log(`Pulling Docker image: ${image}`);
+        await this.dockerManager.pullImage(image);
+      } catch (error) {
+        console.warn(`Failed to pull image ${image}:`, error);
+      }
+    }
+  }
+
+  async executeCode(config: JobConfig): Promise<string> {
+    const jobId = randomUUID();
+    
+    const job: JobResult = {
+      id: jobId,
+      status: 'queued',
+      createdAt: new Date()
+    };
+
+    this.jobs.set(jobId, job);
+    this.emit('jobCreated', job);
+
+    // Add to queue
+    this.jobQueue.push({ jobId, config });
+    
+    // Process queue if not already processing
+    if (!this.isProcessingQueue) {
+      this.processJobQueue();
+    }
+
+    return jobId;
+  }
+
+  private async processJobQueue(): Promise<void> {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    while (this.jobQueue.length > 0 && this.activeJobs.size < this.maxConcurrentJobs) {
+      const queuedJob = this.jobQueue.shift();
+      if (!queuedJob) continue;
+
+      this.activeJobs.add(queuedJob.jobId);
       
-      for (const [key, timestamps] of this.rateLimitTracking.entries()) {
-        const validTimestamps = timestamps.filter(ts => now - ts < windowMs);
-        if (validTimestamps.length === 0) {
-          this.rateLimitTracking.delete(key);
-        } else {
-          this.rateLimitTracking.set(key, validTimestamps);
+      // Process job in background
+      this.processJob(queuedJob.jobId, queuedJob.config)
+        .finally(() => {
+          this.activeJobs.delete(queuedJob.jobId);
+          // Continue processing queue
+          setTimeout(() => this.processJobQueue(), 100);
+        });
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  private async processJob(jobId: string, config: JobConfig): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+
+    try {
+      job.status = 'running';
+      job.startedAt = new Date();
+      this.emit('jobStarted', job);
+
+      const result = await this.runCodeInContainer(config);
+      
+      job.status = 'completed';
+      job.output = result.stdout;
+      job.error = result.stderr;
+      job.exitCode = result.exitCode;
+      job.duration = result.duration;
+      job.memoryUsage = result.memoryUsage;
+      job.cpuUsage = result.cpuUsage;
+      job.completedAt = new Date();
+
+      this.emit('jobCompleted', job);
+
+    } catch (error) {
+      job.status = 'failed';
+      job.error = error instanceof Error ? error.message : String(error);
+      job.completedAt = new Date();
+      
+      this.emit('jobFailed', job);
+    }
+  }
+
+  private async runCodeInContainer(config: JobConfig): Promise<ExecutionResult> {
+    const languageConfig = this.languageConfigs.get(config.language);
+    if (!languageConfig) {
+      throw new Error(`Unsupported language: ${config.language}`);
+    }
+
+    const containerConfig: ContainerConfig = {
+      image: languageConfig.image,
+      memory: config.memoryLimit || '128m',
+      cpu: config.cpuLimit || 0.5,
+      networkMode: 'none', // Disable network access for security
+      user: 'nobody', // Run as non-root user
+      securityOpts: ['no-new-privileges:true'],
+      workingDir: '/app'
+    };
+
+    const containerId = await this.dockerManager.createContainer(containerConfig);
+
+    try {
+      // Create the main code file
+      const fileName = config.language === 'java' ? 'Main.java' : `main.${languageConfig.fileExtension}`;
+      await this.dockerManager.createFileInContainer(containerId, `/app/${fileName}`, config.code);
+
+      // Install dependencies if specified
+      if (config.dependencies && config.dependencies.length > 0) {
+        await this.installDependencies(containerId, config.language, config.dependencies);
+      }
+
+      // Install base packages if needed
+      if (languageConfig.basePackages) {
+        try {
+          await this.dockerManager.executeCommand(
+            containerId,
+            languageConfig.basePackages,
+            { timeout: 60000 }
+          );
+        } catch (error) {
+          console.warn(`Failed to install base packages: ${error}`);
         }
       }
-    }, 3600000); // Run every hour
-  }
 
-  async executeCode(request: ExecutionRequest): Promise<JobResult> {
-    // Validate request
-    this.validateExecutionRequest(request);
-    
-    // Check rate limits
-    this.checkRateLimits(request);
-    
-    // Apply security policies
-    const secureRequest = this.applySecurityPolicies(request);
-    
-    // Create job configuration
-    const jobConfig: JobConfig = {
-      id: request.id || randomUUID(),
-      name: `execution-${secureRequest.userId}`,
-      image: this.getImageForLanguage(secureRequest.language),
-      code: this.sanitizeCode(secureRequest.code, secureRequest.language),
-      language: secureRequest.language,
-      framework: secureRequest.framework,
-      timeout: secureRequest.timeout || this.securityPolicy.maxExecutionTime,
-      memoryLimit: secureRequest.memoryLimit || this.securityPolicy.maxMemoryUsage,
-      cpuLimit: secureRequest.cpuLimit || 1,
-      environment: this.sanitizeEnvironment(secureRequest.environment),
-      inputFiles: secureRequest.inputFiles,
-      expectedOutputs: secureRequest.expectedOutputs
-    };
-    
-    // Track rate limiting
-    this.trackRateLimit(request.userId, request.projectId);
-    
-    // Update language usage metrics
-    this.metrics.languageUsage[secureRequest.language] = 
-      (this.metrics.languageUsage[secureRequest.language] || 0) + 1;
-    
-    // Update user usage metrics
-    this.metrics.userUsage[secureRequest.userId] = 
-      (this.metrics.userUsage[secureRequest.userId] || 0) + 1;
-    
-    try {
-      // Execute the job
-      const result = await this.dockerManager.executeCode(jobConfig);
-      
-      // Post-process result
-      return this.postProcessResult(result, request);
-    } catch (error) {
-      // Handle execution error
-      const errorResult: JobResult = {
-        id: jobConfig.id!,
-        status: 'error',
-        output: '',
-        error: error instanceof Error ? error.message : 'Unknown execution error',
-        exitCode: 1,
-        duration: 0
-      };
-      
-      this.handleJobComplete(errorResult);
-      return errorResult;
-    }
-  }
+      // Compile if needed
+      if (languageConfig.compileCommand) {
+        const compileResult = await this.dockerManager.executeCommand(
+          containerId,
+          languageConfig.compileCommand,
+          { timeout: 30000 }
+        );
 
-  private validateExecutionRequest(request: ExecutionRequest): void {
-    if (!request.code || !request.code.trim()) {
-      throw new Error('Code is required');
-    }
-    
-    if (!request.language) {
-      throw new Error('Language is required');
-    }
-    
-    if (!this.securityPolicy.allowedLanguages.includes(request.language)) {
-      throw new Error(`Language ${request.language} is not allowed`);
-    }
-    
-    if (!request.userId) {
-      throw new Error('User ID is required');
-    }
-    
-    // Check code length
-    if (request.code.length > 100000) { // 100KB limit
-      throw new Error('Code is too large (max 100KB)');
-    }
-    
-    // Check for blocked patterns
-    this.checkForBlockedPatterns(request.code, request.language);
-  }
+        if (compileResult.exitCode !== 0) {
+          throw new Error(`Compilation failed: ${compileResult.stderr}`);
+        }
+      }
 
-  private checkForBlockedPatterns(code: string, language: string): void {
-    const blockedPatterns = {
-      javascript: [
-        /require\s*\(\s*['"]child_process['"]\s*\)/,
-        /require\s*\(\s*['"]fs['"]\s*\)/,
-        /process\.exit/,
-        /eval\s*\(/,
-        /Function\s*\(/
-      ],
-      python: [
-        /import\s+os/,
-        /import\s+subprocess/,
-        /import\s+sys/,
-        /exec\s*\(/,
-        /eval\s*\(/,
-        /__import__/
-      ],
-      typescript: [
-        /require\s*\(\s*['"]child_process['"]\s*\)/,
-        /require\s*\(\s*['"]fs['"]\s*\)/,
-        /process\.exit/,
-        /eval\s*\(/
-      ]
-    };
-    
-    const patterns = blockedPatterns[language as keyof typeof blockedPatterns] || [];
-    
-    for (const pattern of patterns) {
-      if (pattern.test(code)) {
-        throw new Error(`Blocked pattern detected: ${pattern.source}`);
+      // Run tests if provided
+      if (config.tests && config.tests.length > 0) {
+        await this.runTests(containerId, config.language, config.tests);
+      }
+
+      // Execute the code
+      const executionResult = await this.dockerManager.executeCommand(
+        containerId,
+        languageConfig.runCommand,
+        {
+          timeout: config.timeout || 30000,
+          stdin: config.input,
+          environment: config.environment
+        }
+      );
+
+      return executionResult;
+
+    } finally {
+      // Clean up container
+      try {
+        await this.dockerManager.stopContainer(containerId);
+        await this.dockerManager.removeContainer(containerId, true);
+      } catch (error) {
+        console.error(`Failed to cleanup container ${containerId}:`, error);
       }
     }
   }
 
-  private checkRateLimits(request: ExecutionRequest): void {
-    const now = Date.now();
-    const windowMs = this.securityPolicy.rateLimits.timeWindow * 1000;
-    
-    // Check user rate limit
-    const userKey = `user:${request.userId}`;
-    const userTimestamps = this.rateLimitTracking.get(userKey) || [];
-    const recentUserExecutions = userTimestamps.filter(ts => now - ts < windowMs);
-    
-    if (recentUserExecutions.length >= this.securityPolicy.rateLimits.perUser) {
-      throw new Error('User rate limit exceeded');
+  private async installDependencies(
+    containerId: string,
+    language: string,
+    dependencies: string[]
+  ): Promise<void> {
+    const languageConfig = this.languageConfigs.get(language);
+    if (!languageConfig || !languageConfig.dependencies) return;
+
+    for (const dep of dependencies) {
+      const installCommand = languageConfig.dependencies[dep];
+      if (installCommand) {
+        try {
+          await this.dockerManager.executeCommand(
+            containerId,
+            installCommand,
+            { timeout: 60000 }
+          );
+        } catch (error) {
+          console.warn(`Failed to install dependency ${dep}:`, error);
+        }
+      }
     }
-    
-    // Check project rate limit if projectId is provided
-    if (request.projectId) {
-      const projectKey = `project:${request.projectId}`;
-      const projectTimestamps = this.rateLimitTracking.get(projectKey) || [];
-      const recentProjectExecutions = projectTimestamps.filter(ts => now - ts < windowMs);
+  }
+
+  private async runTests(containerId: string, language: string, tests: string[]): Promise<void> {
+    for (let i = 0; i < tests.length; i++) {
+      const testCode = tests[i];
+      const testFileName = `test_${i}.${this.languageConfigs.get(language)?.fileExtension}`;
       
-      if (recentProjectExecutions.length >= this.securityPolicy.rateLimits.perProject) {
-        throw new Error('Project rate limit exceeded');
+      await this.dockerManager.createFileInContainer(containerId, `/app/${testFileName}`, testCode);
+      
+      // Run the test based on language
+      const testCommand = this.getTestCommand(language, testFileName);
+      if (testCommand) {
+        const testResult = await this.dockerManager.executeCommand(
+          containerId,
+          testCommand,
+          { timeout: 10000 }
+        );
+
+        if (testResult.exitCode !== 0) {
+          throw new Error(`Test ${i + 1} failed: ${testResult.stderr}`);
+        }
       }
     }
   }
 
-  private trackRateLimit(userId: string, projectId?: string): void {
-    const now = Date.now();
-    
-    // Track user rate limit
-    const userKey = `user:${userId}`;
-    const userTimestamps = this.rateLimitTracking.get(userKey) || [];
-    userTimestamps.push(now);
-    this.rateLimitTracking.set(userKey, userTimestamps);
-    
-    // Track project rate limit
-    if (projectId) {
-      const projectKey = `project:${projectId}`;
-      const projectTimestamps = this.rateLimitTracking.get(projectKey) || [];
-      projectTimestamps.push(now);
-      this.rateLimitTracking.set(projectKey, projectTimestamps);
-    }
-  }
-
-  private applySecurityPolicies(request: ExecutionRequest): ExecutionRequest {
-    return {
-      ...request,
-      timeout: Math.min(request.timeout || 30, this.securityPolicy.maxExecutionTime),
-      memoryLimit: request.memoryLimit || this.securityPolicy.maxMemoryUsage,
-      cpuLimit: Math.min(request.cpuLimit || 1, 2), // Max 2 CPU cores
-      environment: this.sanitizeEnvironment(request.environment)
-    };
-  }
-
-  private sanitizeEnvironment(env?: Record<string, string>): Record<string, string> {
-    if (!env) return {};
-    
-    const sanitized: Record<string, string> = {};
-    const allowedKeys = ['NODE_ENV', 'PYTHONPATH', 'GOPATH', 'JAVA_HOME'];
-    
-    for (const [key, value] of Object.entries(env)) {
-      if (allowedKeys.includes(key) && typeof value === 'string') {
-        sanitized[key] = value.substring(0, 1000); // Limit value length
-      }
-    }
-    
-    return sanitized;
-  }
-
-  private sanitizeCode(code: string, language: string): string {
-    // Remove potentially dangerous comments or embedded commands
-    let sanitized = code.trim();
-    
-    // Language-specific sanitization
+  private getTestCommand(language: string, testFileName: string): string[] | null {
     switch (language) {
       case 'javascript':
       case 'typescript':
-        // Remove eval and Function constructor usage
-        sanitized = sanitized.replace(/eval\s*\(/g, '// eval(');
-        sanitized = sanitized.replace(/Function\s*\(/g, '// Function(');
-        break;
-      
+        return ['node', testFileName];
       case 'python':
-        // Remove exec and eval usage
-        sanitized = sanitized.replace(/exec\s*\(/g, '# exec(');
-        sanitized = sanitized.replace(/eval\s*\(/g, '# eval(');
-        break;
+        return ['python', testFileName];
+      case 'java':
+        return ['java', testFileName.replace('.java', '')];
+      default:
+        return null;
     }
-    
-    return sanitized;
   }
 
-  private getImageForLanguage(language: string): string {
-    const runtime = this.dockerManager.getLanguageRuntime(language);
-    if (!runtime) {
-      throw new Error(`No runtime available for language: ${language}`);
-    }
-    return runtime.image;
+  async getJobStatus(jobId: string): Promise<JobResult | null> {
+    return this.jobs.get(jobId) || null;
   }
 
-  private postProcessResult(result: JobResult, request: ExecutionRequest): JobResult {
+  async cancelJob(jobId: string): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+
+    if (job.status === 'running') {
+      // Find and stop the container
+      // This is a simplified approach - in production you'd track container IDs per job
+      job.status = 'failed';
+      job.error = 'Job cancelled by user';
+      job.completedAt = new Date();
+      
+      this.emit('jobCancelled', job);
+    }
+  }
+
+  async listJobs(): Promise<JobResult[]> {
+    return Array.from(this.jobs.values()).sort((a, b) => 
+      b.createdAt.getTime() - a.createdAt.getTime()
+    );
+  }
+
+  async getQueueStatus(): Promise<{
+    queueLength: number;
+    activeJobs: number;
+    maxConcurrentJobs: number;
+  }> {
     return {
-      ...result,
-      output: this.sanitizeOutput(result.output),
-      error: result.error ? this.sanitizeOutput(result.error) : undefined
+      queueLength: this.jobQueue.length,
+      activeJobs: this.activeJobs.size,
+      maxConcurrentJobs: this.maxConcurrentJobs
     };
-  }
-
-  private sanitizeOutput(output: string): string {
-    // Remove or mask potentially sensitive information
-    return output
-      .replace(/\/workspace\/[^\s]*/g, '[workspace]') // Hide workspace paths
-      .replace(/\/tmp\/[^\s]*/g, '[temp]') // Hide temp paths
-      .substring(0, 10000); // Limit output length
-  }
-
-  async getExecutionResult(executionId: string): Promise<JobResult | null> {
-    return this.executions.get(executionId) || null;
-  }
-
-  async cancelExecution(executionId: string): Promise<boolean> {
-    try {
-      await this.dockerManager.cancelJob(executionId);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async getExecutionStatus(executionId: string): Promise<string | null> {
-    return await this.dockerManager.getJobStatus(executionId);
-  }
-
-  async getExecutionLogs(executionId: string): Promise<string | null> {
-    return await this.dockerManager.getJobLogs(executionId);
   }
 
   getSupportedLanguages(): string[] {
-    return this.securityPolicy.allowedLanguages;
+    return Array.from(this.languageConfigs.keys());
   }
 
-  getMetrics(): ExecutionMetrics {
-    return { ...this.metrics };
-  }
-
-  getSecurityPolicy(): SecurityPolicy {
-    return { ...this.securityPolicy };
-  }
-
-  updateSecurityPolicy(policy: Partial<SecurityPolicy>): void {
-    this.securityPolicy = { ...this.securityPolicy, ...policy };
-    
-    // Update docker manager settings
-    if (policy.maxConcurrentJobs) {
-      this.dockerManager.setMaxConcurrentJobs(policy.maxConcurrentJobs);
-    }
-  }
-
-  async getSystemHealth(): Promise<{
-    status: 'healthy' | 'degraded' | 'unhealthy';
-    details: Record<string, any>;
-  }> {
-    const dockerHealthy = await this.dockerManager.isHealthy();
-    const queueStatus = this.dockerManager.getQueueStatus();
-    const stats = await this.dockerManager.getStats();
-    
-    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
-    
-    if (!dockerHealthy) {
-      status = 'unhealthy';
-    } else if (queueStatus.queueLength > 50 || queueStatus.activeJobs >= queueStatus.maxConcurrent) {
-      status = 'degraded';
-    }
-    
-    return {
-      status,
-      details: {
-        dockerHealthy,
-        queueStatus,
-        stats,
-        metrics: this.metrics,
-        supportedLanguages: this.getSupportedLanguages().length
-      }
-    };
+  getLanguageConfig(language: string): LanguageConfig | undefined {
+    return this.languageConfigs.get(language);
   }
 
   async cleanup(): Promise<void> {
+    console.log('Cleaning up execution service...');
+    
+    // Cancel all running jobs
+    for (const [jobId, job] of this.jobs.entries()) {
+      if (job.status === 'running') {
+        await this.cancelJob(jobId);
+      }
+    }
+
+    // Clean up Docker containers
     await this.dockerManager.cleanup();
-    this.executions.clear();
-    this.rateLimitTracking.clear();
+  }
+
+  async healthCheck(): Promise<{
+    status: string;
+    dockerAvailable: boolean;
+    activeJobs: number;
+    queueLength: number;
+    totalJobs: number;
+  }> {
+    const dockerAvailable = await this.dockerManager.isDockerAvailable();
+    
+    return {
+      status: dockerAvailable ? 'healthy' : 'unhealthy',
+      dockerAvailable,
+      activeJobs: this.activeJobs.size,
+      queueLength: this.jobQueue.length,
+      totalJobs: this.jobs.size
+    };
   }
 }
 
