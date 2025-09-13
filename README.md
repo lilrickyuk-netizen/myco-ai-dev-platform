@@ -1,8 +1,12 @@
-# Myco AI Development Platform
+# 🚀 Myco AI Development Platform
+
+[![CI/CD Pipeline](https://github.com/myco-platform/myco-platform/workflows/CI/CD%20Pipeline/badge.svg)](https://github.com/myco-platform/myco-platform/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/myco-platform/myco-platform/releases)
 
 A comprehensive AI-powered development platform that enables rapid application development through multi-agent code generation, real-time collaboration, and integrated development environments.
 
-## 🚀 Features
+## ✨ Features
 
 ### 🤖 AI-Powered Development
 - **Multi-Agent System**: Specialized AI agents for planning, architecture, backend, frontend, DevOps, and testing
@@ -96,12 +100,32 @@ The platform consists of several microservices:
 
 4. **Install dependencies**
    ```bash
-   npm run install:all
+   # Backend
+   cd backend && npm install && cd ..
+   
+   # Frontend
+   cd frontend && npm install && cd ..
+   
+   # Execution Engine
+   cd execution-engine && npm install && cd ..
+   
+   # AI Engine
+   cd ai-engine && pip install -r requirements.txt && cd ..
    ```
 
 5. **Start development servers**
    ```bash
-   npm run dev
+   # Backend (Encore.ts)
+   cd backend && npm run dev &
+   
+   # Frontend (React + Vite)
+   cd frontend && npm run dev &
+   
+   # AI Engine (FastAPI)
+   cd ai-engine && uvicorn main:app --reload --port 8000 &
+   
+   # Execution Engine (Node.js)
+   cd execution-engine && npm run dev &
    ```
 
 6. **Access the application**
@@ -112,26 +136,52 @@ The platform consists of several microservices:
 
 ### Production Deployment
 
-1. **Build Docker images**
-   ```bash
-   npm run docker:build
-   ```
+#### Docker Compose (Recommended for small deployments)
+```bash
+# Copy environment file
+cp .env.example .env.production
 
-2. **Deploy with Kubernetes**
-   ```bash
-   kubectl apply -f infrastructure/kubernetes/
-   ```
+# Edit with production values
+vim .env.production
 
-3. **Or deploy with Docker Compose**
-   ```bash
-   docker-compose -f docker-compose.prod.yml up -d
-   ```
+# Deploy
+docker-compose -f docker-compose.yml up -d
+```
+
+#### Kubernetes (Recommended for production)
+```bash
+# Configure kubectl to point to your cluster
+kubectl config current-context
+
+# Create namespace
+kubectl apply -f infrastructure/kubernetes/namespace.yaml
+
+# Apply secrets (edit with your values first)
+kubectl apply -f infrastructure/kubernetes/secrets.yaml
+
+# Deploy application
+kubectl apply -f infrastructure/kubernetes/
+```
+
+#### Terraform (AWS Infrastructure)
+```bash
+cd infrastructure/terraform
+
+# Initialize Terraform
+terraform init
+
+# Plan deployment
+terraform plan -var-file="prod.tfvars"
+
+# Deploy infrastructure
+terraform apply -var-file="prod.tfvars"
+```
 
 ## 📖 API Documentation
 
 ### Backend API
 - Interactive API docs: http://localhost:3000/docs
-- OpenAPI spec: http://localhost:3000/openapi.json
+- Health check: http://localhost:3000/health
 
 ### AI Engine API
 - Interactive API docs: http://localhost:8000/docs
@@ -145,7 +195,17 @@ The platform consists of several microservices:
 
 ### Unit Tests
 ```bash
-npm run test
+# Backend
+cd backend && npm test
+
+# Frontend
+cd frontend && npm test
+
+# Execution Engine
+cd execution-engine && npm test
+
+# AI Engine
+cd ai-engine && python -m pytest
 ```
 
 ### Integration Tests
@@ -155,6 +215,10 @@ npm run test:integration
 
 ### End-to-End Tests
 ```bash
+# Install Playwright
+npx playwright install
+
+# Run E2E tests
 npm run test:e2e
 ```
 
@@ -181,6 +245,11 @@ npm run test:coverage
 - **Tracing**: Distributed tracing for request flows
 - **Alerting**: Automated alerts for system issues
 
+### Monitoring Stack Access
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3001 (admin/admin)
+- **Kibana**: http://localhost:5601
+
 ## 🚀 Deployment
 
 ### Environment Configuration
@@ -199,41 +268,72 @@ Supported deployment targets:
 - **Azure**: AKS, Container Instances
 - **DigitalOcean**: Kubernetes, App Platform
 
+### Environment Variables
+
+Key environment variables to configure:
+
+```bash
+# Database
+DATABASE_URL=postgresql://user:pass@host:port/db
+REDIS_URL=redis://host:port/db
+MONGODB_URL=mongodb://host:port/db
+
+# AI Services
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+GOOGLE_API_KEY=your_google_key
+
+# Authentication
+JWT_SECRET=your_jwt_secret
+CLERK_SECRET_KEY=your_clerk_secret
+
+# Services
+AI_ENGINE_URL=http://ai-engine:8000
+EXECUTION_ENGINE_URL=http://execution-engine:8001
+```
+
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ### Development Guidelines
 
-- Follow TypeScript/Python best practices
-- Write tests for new features
-- Update documentation
-- Follow conventional commit messages
-- Ensure CI/CD pipeline passes
+1. **Code Style**: Follow TypeScript/Python best practices
+2. **Testing**: Write tests for new features
+3. **Documentation**: Update documentation for changes
+4. **Commits**: Use conventional commit messages
+5. **CI/CD**: Ensure all checks pass
+
+### Getting Started
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests for your changes
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
 ## 📋 Roadmap
 
-### Short Term
+### Current Release (v1.0.0)
+- ✅ Multi-agent AI system
+- ✅ Code execution engine
+- ✅ Real-time collaboration
+- ✅ Project templates
+- ✅ Comprehensive monitoring
+
+### Next Release (v1.1.0)
 - [ ] Enhanced AI model support (Llama 2, CodeLlama)
 - [ ] Advanced debugging tools
 - [ ] Mobile-responsive design improvements
 - [ ] Plugin system for extensions
 
-### Medium Term
+### Future Releases
 - [ ] Multi-tenant architecture
 - [ ] Advanced collaboration features
 - [ ] Integration with popular IDEs
 - [ ] Marketplace for templates and plugins
-
-### Long Term
-- [ ] Custom AI model fine-tuning
-- [ ] Advanced deployment orchestration
-- [ ] Enterprise SSO integration
-- [ ] Advanced analytics and insights
 
 ## 📄 License
 
@@ -249,11 +349,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- Documentation: [docs.myco.dev](https://docs.myco.dev)
-- Discord: [discord.gg/myco](https://discord.gg/myco)
-- Email: support@myco.dev
-- GitHub Issues: [Issues](https://github.com/myco-platform/myco-platform/issues)
+- **Documentation**: [docs.myco.dev](https://docs.myco.dev)
+- **Discord**: [discord.gg/myco](https://discord.gg/myco)
+- **Email**: support@myco.dev
+- **GitHub Issues**: [Issues](https://github.com/myco-platform/myco-platform/issues)
+
+## 🔗 Links
+
+- **Live Demo**: [demo.myco.dev](https://demo.myco.dev)
+- **Documentation**: [docs.myco.dev](https://docs.myco.dev)
+- **Blog**: [blog.myco.dev](https://blog.myco.dev)
+- **Twitter**: [@myco_dev](https://twitter.com/myco_dev)
 
 ---
 
 **Built with ❤️ by the Myco Team**
+
+*Empowering developers to build amazing applications with AI assistance.*

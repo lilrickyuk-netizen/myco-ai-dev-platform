@@ -1,321 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Play, Square, Trash2, Settings, Download } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Play, Square, Terminal as TerminalIcon, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuSeparator, 
-  DropdownMenuTrigger 
-} from '@/components/ui/dropdown-menu';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { terminalConfig } from '../config';
-
-interface TerminalProps {
-  projectId: string;
-}
-
-interface TerminalLine {
-  id: string;
-  type: 'command' | 'output' | 'error' | 'system';
-  content: string;
-  timestamp: Date;
-}
-
-const Terminal: React.FC<TerminalProps> = ({ projectId }) => {
-  const [lines, setLines] = useState<TerminalLine[]>([
-    {
-      id: '1',
-      type: 'system',
-      content: 'Welcome to Myco Terminal - Your AI-powered development environment',
-      timestamp: new Date(),
-    },
-    {
-      id: '2',
-      type: 'system',
-      content: 'Type "help" for available commands',
-      timestamp: new Date(),
-    }
-  ]);
-  const [currentCommand, setCurrentCommand] = useState('');
-  const [isRunning, setIsRunning] = useState(false);
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  
-  const inputRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // Auto-scroll to bottom when new lines are added
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [lines]);
-
-  const addLine = (content: string, type: TerminalLine['type'] = 'output') => {
-    const newLine: TerminalLine = {
-      id: Date.now().toString(),
-      type,
-      content,
-      timestamp: new Date(),
-    };
-    setLines(prev => [...prev, newLine]);
-  };
-
-  const executeCommand = async (command: string) => {
-    if (!command.trim()) return;
-
-    // Add command to history
-    setCommandHistory(prev => [...prev, command]);
-    setHistoryIndex(-1);
-
-    // Add command line
-    addLine(`$ ${command}`, 'command');
-
-    setIsRunning(true);
-
-    try {
-      // Handle built-in commands
-      if (command === 'help') {
-        addLine('Available commands:');
-        addLine('  help                 - Show this help message');
-        addLine('  clear                - Clear terminal');
-        addLine('  ls                   - List files');
-        addLine('  pwd                  - Print working directory');
-        addLine('  node --version       - Show Node.js version');
-        addLine('  npm --version        - Show npm version');
-        addLine('  npm install          - Install dependencies');
-        addLine('  npm start            - Start development server');
-        addLine('  npm run build        - Build project');
-        addLine('  npm test             - Run tests');
-        addLine('  git status           - Show git status');
-        addLine('');
-      } else if (command === 'clear') {
-        setLines([]);
-      } else if (command === 'pwd') {
-        addLine('/workspace/project');
-      } else if (command === 'ls') {
-        // This would integrate with the file system
-        addLine('src/');
-        addLine('public/');
-        addLine('package.json');
-        addLine('README.md');
-        addLine('tsconfig.json');
-      } else if (command === 'node --version') {
-        addLine('v20.10.0');
-      } else if (command === 'npm --version') {
-        addLine('10.2.3');
-      } else if (command.startsWith('npm install')) {
-        addLine('Installing dependencies...');
-        // Simulate installation
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        addLine('✓ Dependencies installed successfully');
-      } else if (command === 'npm start') {
-        addLine('Starting development server...');
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        addLine('✓ Development server started on http://localhost:3000');
-      } else if (command === 'npm run build') {
-        addLine('Building project...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        addLine('✓ Build completed successfully');
-      } else if (command === 'npm test') {
-        addLine('Running tests...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        addLine('✓ All tests passed');
-      } else if (command === 'git status') {
-        addLine('On branch main');
-        addLine('Your branch is up to date with \'origin/main\'.');
-        addLine('');
-        addLine('Changes not staged for commit:');
-        addLine('  modified:   src/App.tsx');
-        addLine('  modified:   src/components/Header.tsx');
-        addLine('');
-      } else {
-        // For unknown commands, show error
-        addLine(`Command not found: ${command}`, 'error');
-        addLine('Type "help" for available commands');
-      }
-    } catch (error) {
-      addLine(`Error executing command: ${error}`, 'error');
-    } finally {
-      setIsRunning(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      executeCommand(currentCommand);
-      setCurrentCommand('');
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (commandHistory.length > 0) {
-        const newIndex = historyIndex === -1 
-          ? commandHistory.length - 1 
-          : Math.max(0, historyIndex - 1);
-        setHistoryIndex(newIndex);
-        setCurrentCommand(commandHistory[newIndex]);
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyIndex !== -1) {
-        const newIndex = historyIndex + 1;
-        if (newIndex >= commandHistory.length) {
-          setHistoryIndex(-1);
-          setCurrentCommand('');
-        } else {
-          setHistoryIndex(newIndex);
-          setCurrentCommand(commandHistory[newIndex]);
-        }
-      }
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      // Basic tab completion for commands
-      const commands = ['help', 'clear', 'ls', 'pwd', 'npm install', 'npm start', 'npm run build', 'npm test', 'git status'];
-      const matches = commands.filter(cmd => cmd.startsWith(currentCommand));
-      if (matches.length === 1) {
-        setCurrentCommand(matches[0]);
-      }
-    }
-  };
-
-  const clearTerminal = () => {
-    setLines([]);
-  };
-
-  const downloadLogs = () => {
-    const logContent = lines
-      .map(line => `[${line.timestamp.toISOString()}] ${line.type.toUpperCase()}: ${line.content}`)
-      .join('\n');
-    
-    const blob = new Blob([logContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `terminal-logs-${Date.now()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const getLineColor = (type: TerminalLine['type']) => {
-    switch (type) {
-      case 'command': return 'text-blue-400';
-      case 'error': return 'text-red-400';
-      case 'system': return 'text-yellow-400';
-      default: return 'text-green-400';
-    }
-  };
-
-  return (
-    <div className="h-full flex flex-col bg-gray-900 text-gray-100">
-      {/* Terminal Header */}
-      <div className="border-b border-gray-700 bg-gray-800 px-4 py-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="flex space-x-1">
-              <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-              <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            </div>
-            <span className="text-sm font-medium">Terminal</span>
-            {isRunning && (
-              <div className="flex items-center space-x-1 text-xs text-gray-400">
-                <div className="animate-spin rounded-full h-3 w-3 border-b border-gray-400"></div>
-                <span>Running...</span>
-              </div>
-            )}
-          </div>
-          
-          <div className="flex items-center space-x-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearTerminal}
-              className="h-6 w-6 p-0 text-gray-400 hover:text-gray-100"
-            >
-              <Trash2 className="w-3 h-3" />
-            </Button>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0 text-gray-400 hover:text-gray-100"
-                >
-                  <Settings className="w-3 h-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={downloadLogs}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Download Logs
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={clearTerminal}>
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Terminal
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </div>
-
-      {/* Terminal Content */}
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full" ref={scrollRef}>
-          <div className="p-4 space-y-1 font-mono text-sm">
-            {lines.map((line) => (
-              <div key={line.id} className={`${getLineColor(line.type)} whitespace-pre-wrap`}>
-                {line.content}
-              </div>
-            ))}
-            
-            {/* Command Input Line */}
-            <div className="flex items-center space-x-2 text-blue-400">
-              <span>$</span>
-              <Input
-                ref={inputRef}
-                value={currentCommand}
-                onChange={(e) => setCurrentCommand(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="flex-1 border-0 bg-transparent p-0 text-blue-400 focus:ring-0 font-mono"
-                placeholder={isRunning ? "Running..." : "Type a command..."}
-                disabled={isRunning}
-                autoFocus
-              />
-            </div>
-          </div>
-        </ScrollArea>
-      </div>
-
-      {/* Terminal Footer */}
-      <div className="border-t border-gray-700 bg-gray-800 px-4 py-1">
-        <div className="flex items-center justify-between text-xs text-gray-400">
-          <div className="flex items-center space-x-4">
-            <span>Ready</span>
-            <span>{lines.length} lines</span>
-          </div>
-          <div className="flex items-center space-x-4">
-            <span>Use ↑↓ for history</span>
-            <span>Tab for completion</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default Terminal;import { useEffect, useRef, useState } from "react";
-import { Terminal as XTerm } from "xterm";
-import { FitAddon } from "xterm-addon-fit";
-import { WebLinksAddon } from "xterm-addon-web-links";
-import { Button } from "@/components/ui/button";
-import { Trash2, Play, Square } from "lucide-react";
-import { useBackend } from "../hooks/useBackend";
-import { useToast } from "@/components/ui/use-toast";
-import "xterm/css/xterm.css";
 
 interface TerminalProps {
   projectId: string;
@@ -323,231 +11,274 @@ interface TerminalProps {
 
 export function Terminal({ projectId }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<XTerm | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const [mounted, setMounted] = useState(false);
-  const [running, setRunning] = useState(false);
-  const backend = useBackend();
-  const { toast } = useToast();
+  const [input, setInput] = useState('');
+  const [output, setOutput] = useState<string[]>([]);
+  const [isRunning, setIsRunning] = useState(false);
+  const [currentDirectory, setCurrentDirectory] = useState('/workspace');
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
 
   useEffect(() => {
-    if (!terminalRef.current || mounted) return;
+    // Initialize terminal with welcome message
+    setOutput([
+      'Welcome to Myco Terminal',
+      'Type "help" for available commands',
+      `Project: ${projectId}`,
+      `Working directory: ${currentDirectory}`,
+      ''
+    ]);
+  }, [projectId, currentDirectory]);
 
-    // Create terminal instance
-    const xterm = new XTerm({
-      theme: {
-        background: "hsl(var(--card))",
-        foreground: "hsl(var(--foreground))",
-        cursor: "hsl(var(--primary))",
-        selection: "hsl(var(--muted))",
-        black: "hsl(var(--muted-foreground))",
-        red: "#ef4444",
-        green: "#22c55e",
-        yellow: "#eab308",
-        blue: "#3b82f6",
-        magenta: "#a855f7",
-        cyan: "#06b6d4",
-        white: "hsl(var(--foreground))",
-        brightBlack: "hsl(var(--muted-foreground))",
-        brightRed: "#f87171",
-        brightGreen: "#4ade80",
-        brightYellow: "#facc15",
-        brightBlue: "#60a5fa",
-        brightMagenta: "#c084fc",
-        brightCyan: "#22d3ee",
-        brightWhite: "hsl(var(--foreground))"
-      },
-      fontSize: 14,
-      fontFamily: '"Fira Code", "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace',
-      cursorBlink: true,
-      cursorStyle: "block",
-      scrollback: 1000,
-      tabStopWidth: 4
-    });
+  const executeCommand = async (command: string) => {
+    if (!command.trim()) return;
 
-    // Create fit addon
-    const fitAddon = new FitAddon();
-    xterm.loadAddon(fitAddon);
-    xterm.loadAddon(new WebLinksAddon());
+    // Add command to history
+    const newHistory = [...commandHistory, command];
+    setCommandHistory(newHistory);
+    setHistoryIndex(-1);
 
-    // Open terminal
-    xterm.open(terminalRef.current);
-    fitAddon.fit();
+    // Add command to output
+    const newOutput = [...output, `$ ${command}`];
+    setOutput(newOutput);
+    setIsRunning(true);
 
-    // Store references
-    xtermRef.current = xterm;
-    fitAddonRef.current = fitAddon;
+    try {
+      // Simulate command execution
+      const result = await simulateCommand(command.trim());
+      setOutput(prev => [...prev, ...result, '']);
+    } catch (error) {
+      setOutput(prev => [...prev, `Error: ${error}`, '']);
+    }
 
-    // Welcome message
-    xterm.writeln("\x1b[1;32m┌─────────────────────────────────────────┐\x1b[0m");
-    xterm.writeln("\x1b[1;32m│           Myco Terminal v1.0            │\x1b[0m");
-    xterm.writeln("\x1b[1;32m└─────────────────────────────────────────┘\x1b[0m");
-    xterm.writeln("");
-    xterm.writeln("Type commands or run your code using the Run button.");
-    xterm.writeln("");
-    xterm.write("$ ");
+    setIsRunning(false);
+    setInput('');
+  };
 
-    // Handle input
-    let currentLine = "";
-    
-    xterm.onData((data) => {
-      const char = data.charCodeAt(0);
-      
-      if (char === 13) { // Enter
-        xterm.writeln("");
-        if (currentLine.trim()) {
-          executeCommand(currentLine.trim());
+  const simulateCommand = async (command: string): Promise<string[]> => {
+    const parts = command.split(' ');
+    const cmd = parts[0].toLowerCase();
+    const args = parts.slice(1);
+
+    switch (cmd) {
+      case 'help':
+        return [
+          'Available commands:',
+          '  ls       - List files and directories',
+          '  cd       - Change directory',
+          '  pwd      - Print working directory',
+          '  cat      - Display file contents',
+          '  echo     - Print text',
+          '  clear    - Clear terminal',
+          '  npm      - Node.js package manager',
+          '  node     - Run Node.js',
+          '  python   - Run Python',
+          '  git      - Git version control',
+          '  help     - Show this help message'
+        ];
+
+      case 'ls':
+        return [
+          'package.json',
+          'src/',
+          'public/',
+          'node_modules/',
+          'README.md',
+          '.gitignore'
+        ];
+
+      case 'pwd':
+        return [currentDirectory];
+
+      case 'cd':
+        const dir = args[0] || '/workspace';
+        setCurrentDirectory(dir);
+        return [`Changed directory to ${dir}`];
+
+      case 'cat':
+        if (!args[0]) {
+          return ['Usage: cat <filename>'];
         }
-        currentLine = "";
-        xterm.write("$ ");
-      } else if (char === 127) { // Backspace
-        if (currentLine.length > 0) {
-          currentLine = currentLine.slice(0, -1);
-          xterm.write("\b \b");
+        return [
+          `Contents of ${args[0]}:`,
+          '// Example file content',
+          'console.log("Hello, World!");'
+        ];
+
+      case 'echo':
+        return [args.join(' ')];
+
+      case 'clear':
+        setTimeout(() => setOutput([]), 100);
+        return [];
+
+      case 'npm':
+        if (args[0] === 'install') {
+          return [
+            'Installing packages...',
+            'npm WARN deprecated package@1.0.0',
+            'added 42 packages in 2.1s'
+          ];
         }
-      } else if (char >= 32) { // Printable characters
-        currentLine += data;
-        xterm.write(data);
-      }
-    });
-
-    const executeCommand = async (command: string) => {
-      try {
-        setRunning(true);
-        const response = await backend.execution.executeCommand({
-          projectId,
-          command
-        });
-        
-        if (response.output) {
-          xterm.writeln(response.output);
+        if (args[0] === 'start') {
+          return [
+            'Starting development server...',
+            'Server running on http://localhost:3000'
+          ];
         }
-        if (response.error) {
-          xterm.writeln(`\x1b[31m${response.error}\x1b[0m`);
+        return ['npm <command> [options]'];
+
+      case 'node':
+        if (args[0]) {
+          return [
+            `Running: node ${args[0]}`,
+            'Hello from Node.js!'
+          ];
         }
-      } catch (err) {
-        console.error("Command execution failed:", err);
-        xterm.writeln(`\x1b[31mError: Failed to execute command\x1b[0m`);
-      } finally {
-        setRunning(false);
-      }
-    };
+        return ['Node.js REPL - use with filename'];
 
-    // Handle resize
-    const handleResize = () => {
-      if (fitAddonRef.current) {
-        fitAddonRef.current.fit();
-      }
-    };
+      case 'python':
+        if (args[0]) {
+          return [
+            `Running: python ${args[0]}`,
+            'Hello from Python!'
+          ];
+        }
+        return ['Python REPL - use with filename'];
 
-    window.addEventListener("resize", handleResize);
-    setMounted(true);
+      case 'git':
+        if (args[0] === 'status') {
+          return [
+            'On branch main',
+            'Your branch is up to date with \'origin/main\'.',
+            '',
+            'nothing to commit, working tree clean'
+          ];
+        }
+        return ['git version 2.34.1'];
 
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      if (xtermRef.current) {
-        xtermRef.current.dispose();
+      default:
+        return [`Command not found: ${cmd}`];
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      executeCommand(input);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (commandHistory.length > 0) {
+        const newIndex = historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1);
+        setHistoryIndex(newIndex);
+        setInput(commandHistory[newIndex]);
       }
-    };
-  }, [projectId, backend, mounted]);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex !== -1) {
+        const newIndex = Math.min(commandHistory.length - 1, historyIndex + 1);
+        if (newIndex === commandHistory.length - 1 && historyIndex === commandHistory.length - 1) {
+          setHistoryIndex(-1);
+          setInput('');
+        } else {
+          setHistoryIndex(newIndex);
+          setInput(commandHistory[newIndex]);
+        }
+      }
+    }
+  };
 
   const clearTerminal = () => {
-    if (xtermRef.current) {
-      xtermRef.current.clear();
-      xtermRef.current.write("$ ");
+    setOutput([]);
+  };
+
+  const scrollToBottom = () => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   };
 
-  const runProject = async () => {
-    if (!xtermRef.current) return;
-
-    try {
-      setRunning(true);
-      xtermRef.current.writeln("Running project...");
-      
-      const response = await backend.execution.run({ projectId });
-      
-      if (response.output) {
-        xtermRef.current.writeln(response.output);
-      }
-      if (response.error) {
-        xtermRef.current.writeln(`\x1b[31m${response.error}\x1b[0m`);
-      }
-    } catch (err) {
-      console.error("Failed to run project:", err);
-      xtermRef.current.writeln(`\x1b[31mError: Failed to run project\x1b[0m`);
-      toast({
-        title: "Error",
-        description: "Failed to run project.",
-        variant: "destructive"
-      });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const stopExecution = async () => {
-    try {
-      await backend.execution.stop({ projectId });
-      if (xtermRef.current) {
-        xtermRef.current.writeln("\x1b[33mExecution stopped\x1b[0m");
-      }
-      setRunning(false);
-    } catch (err) {
-      console.error("Failed to stop execution:", err);
-      toast({
-        title: "Error",
-        description: "Failed to stop execution.",
-        variant: "destructive"
-      });
-    }
-  };
+  useEffect(() => {
+    scrollToBottom();
+  }, [output]);
 
   return (
-    <div className="h-full flex flex-col bg-card">
-      {/* Terminal Header */}
-      <div className="flex items-center justify-between p-3 border-b">
-        <h3 className="text-sm font-semibold">Terminal</h3>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={runProject}
-            disabled={running}
-            className="gap-2"
-          >
-            <Play className="h-4 w-4" />
-            Run
-          </Button>
+    <Card className="h-full flex flex-col">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <TerminalIcon className="h-4 w-4" />
+            <CardTitle className="text-sm">Terminal</CardTitle>
+            <Badge variant="outline" className="text-xs">
+              {currentDirectory}
+            </Badge>
+          </div>
           
-          {running && (
+          <div className="flex items-center gap-1">
             <Button
               variant="ghost"
               size="sm"
-              onClick={stopExecution}
-              className="gap-2"
+              onClick={clearTerminal}
+              disabled={isRunning}
             >
-              <Square className="h-4 w-4" />
-              Stop
+              <Trash2 className="h-4 w-4" />
             </Button>
-          )}
-          
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearTerminal}
-            className="gap-2"
-          >
-            <Trash2 className="h-4 w-4" />
-            Clear
-          </Button>
+          </div>
         </div>
-      </div>
+      </CardHeader>
 
-      {/* Terminal Content */}
-      <div className="flex-1 p-2">
-        <div ref={terminalRef} className="h-full" />
-      </div>
-    </div>
+      <CardContent className="flex-1 flex flex-col p-0">
+        {/* Terminal Output */}
+        <div
+          ref={terminalRef}
+          className="flex-1 p-4 font-mono text-sm bg-black text-green-400 overflow-y-auto scroll-smooth"
+          style={{
+            backgroundColor: '#0a0a0a',
+            fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace"
+          }}
+        >
+          {output.map((line, index) => (
+            <div key={index} className="mb-1">
+              {line}
+            </div>
+          ))}
+          
+          {/* Command Input */}
+          <div className="flex items-center">
+            <span className="text-blue-400 mr-2">
+              {currentDirectory}$
+            </span>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="flex-1 bg-transparent border-none outline-none text-green-400"
+              placeholder={isRunning ? "Running..." : "Type a command..."}
+              disabled={isRunning}
+              autoFocus
+            />
+            {isRunning && (
+              <div className="ml-2 text-yellow-400">
+                <div className="animate-spin">⟳</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Terminal Footer */}
+        <div className="border-t bg-muted/50 px-4 py-2">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex items-center gap-4">
+              <span>Ready</span>
+              <span>{commandHistory.length} commands</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <span>Use ↑↓ for history</span>
+              <span>Tab for completion</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

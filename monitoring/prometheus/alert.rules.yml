@@ -1,8 +1,7 @@
-# Alert Rules for Hybrid Development Platform
 groups:
-  - name: hybrid-dev-platform
+  - name: myco_platform_alerts
     rules:
-      # High-level service availability
+      # High-level service alerts
       - alert: ServiceDown
         expr: up == 0
         for: 1m
@@ -12,29 +11,75 @@ groups:
           summary: "Service {{ $labels.job }} is down"
           description: "{{ $labels.job }} has been down for more than 1 minute."
 
-      # API Response Time
-      - alert: HighAPILatency
-        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{code=~"5.."}[5m]) > 0.1
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High API latency on {{ $labels.job }}"
-          description: "95th percentile latency is {{ $value }}s for {{ $labels.job }}"
+          summary: "High error rate on {{ $labels.job }}"
+          description: "{{ $labels.job }} has a high error rate of {{ $value }} errors per second."
 
-      # Error Rate
-      - alert: HighErrorRate
-        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+      # Backend-specific alerts
+      - alert: BackendHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="backend"}[5m])) > 2
         for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend high latency"
+          description: "Backend 95th percentile latency is {{ $value }}s"
+
+      - alert: BackendDatabaseConnectionFailure
+        expr: increase(database_connection_errors_total[5m]) > 5
+        for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "High error rate on {{ $labels.job }}"
-          description: "Error rate is {{ $value | humanizePercentage }} for {{ $labels.job }}"
+          summary: "Backend database connection failures"
+          description: "Backend has {{ $value }} database connection failures in the last 5 minutes"
 
-      # System Resource Alerts
+      # AI Engine alerts
+      - alert: AIEngineHighMemoryUsage
+        expr: (process_resident_memory_bytes{job="ai-engine"} / 1024 / 1024 / 1024) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AI Engine high memory usage"
+          description: "AI Engine is using {{ $value }}GB of memory"
+
+      - alert: LLMRequestFailures
+        expr: increase(ai_engine_llm_requests_failed_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High LLM request failures"
+          description: "{{ $value }} LLM requests failed in the last 5 minutes"
+
+      # Execution Engine alerts
+      - alert: ExecutionEngineJobQueueFull
+        expr: execution_engine_queue_length > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Execution engine queue is full"
+          description: "Execution engine has {{ $value }} jobs in queue"
+
+      - alert: ContainerCreationFailures
+        expr: increase(execution_engine_container_creation_failures_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High container creation failures"
+          description: "{{ $value }} container creation failures in the last 5 minutes"
+
+      # Infrastructure alerts
       - alert: HighCPUUsage
-        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
         for: 5m
         labels:
           severity: warning
@@ -52,36 +97,44 @@ groups:
           description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
 
       - alert: DiskSpaceLow
-        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 90
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 85
         for: 5m
         labels:
-          severity: critical
+          severity: warning
         annotations:
           summary: "Low disk space on {{ $labels.instance }}"
           description: "Disk usage is {{ $value }}% on {{ $labels.instance }}"
 
-      # Database Alerts
-      - alert: DatabaseConnectionHigh
-        expr: pg_stat_activity_count > 80
+      # Database alerts
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is down"
+
+      - alert: PostgreSQLTooManyConnections
+        expr: sum by (instance) (pg_stat_activity_count) > 80
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High database connections"
+          summary: "PostgreSQL too many connections"
           description: "PostgreSQL has {{ $value }} active connections"
 
-      - alert: DatabaseSlowQueries
-        expr: rate(pg_stat_statements_mean_time_ms[5m]) > 1000
-        for: 5m
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
         labels:
-          severity: warning
+          severity: critical
         annotations:
-          summary: "Slow database queries detected"
-          description: "Average query time is {{ $value }}ms"
+          summary: "Redis is down"
+          description: "Redis cache is down"
 
-      # Redis Alerts
       - alert: RedisHighMemoryUsage
-        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 90
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 85
         for: 5m
         labels:
           severity: warning
@@ -89,87 +142,40 @@ groups:
           summary: "Redis high memory usage"
           description: "Redis memory usage is {{ $value }}%"
 
-      # Container Alerts
-      - alert: ContainerHighCPU
-        expr: rate(container_cpu_usage_seconds_total[5m]) * 100 > 80
+      # Application-specific business logic alerts
+      - alert: LowProjectCreationRate
+        expr: rate(myco_projects_created_total[1h]) < 0.1
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low project creation rate"
+          description: "Only {{ $value }} projects created per hour"
+
+      - alert: HighAIGenerationFailureRate
+        expr: (rate(ai_generation_failures_total[5m]) / rate(ai_generation_requests_total[5m])) > 0.1
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Container {{ $labels.name }} high CPU usage"
-          description: "Container CPU usage is {{ $value }}%"
+          summary: "High AI generation failure rate"
+          description: "AI generation failure rate is {{ $value }}%"
 
-      - alert: ContainerHighMemory
-        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100 > 85
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Container {{ $labels.name }} high memory usage"
-          description: "Container memory usage is {{ $value }}%"
-
-      # Application-specific Alerts
-      - alert: AIEngineRequestQueueHigh
-        expr: ai_engine_request_queue_size > 100
+      # Security alerts
+      - alert: TooManyAuthenticationFailures
+        expr: increase(auth_failures_total[5m]) > 20
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "AI Engine request queue is high"
-          description: "AI Engine has {{ $value }} requests queued"
+          summary: "Too many authentication failures"
+          description: "{{ $value }} authentication failures in the last 5 minutes"
 
-      - alert: ExecutionEngineContainerLimit
-        expr: execution_engine_active_containers > 50
-        for: 5m
+      - alert: SuspiciousAPIActivity
+        expr: rate(http_requests_total[5m]) > 100
+        for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "High number of active containers"
-          description: "Execution Engine has {{ $value }} active containers"
-
-      - alert: DeploymentFailureRate
-        expr: rate(deployment_failures_total[10m]) > 0.1
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "High deployment failure rate"
-          description: "Deployment failure rate is {{ $value }} per second"
-
-      # Security Alerts
-      - alert: UnauthorizedAccessAttempts
-        expr: rate(http_requests_total{status="401"}[5m]) > 10
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High rate of unauthorized access attempts"
-          description: "{{ $value }} unauthorized requests per second"
-
-      - alert: SecurityScanVulnerabilities
-        expr: security_vulnerabilities_high > 0
-        for: 0m
-        labels:
-          severity: critical
-        annotations:
-          summary: "High severity vulnerabilities detected"
-          description: "{{ $value }} high severity vulnerabilities found"
-
-      # Business Metrics
-      - alert: UserSessionDropHigh
-        expr: rate(user_sessions_ended_total[10m]) / rate(user_sessions_started_total[10m]) > 0.5
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High user session drop rate"
-          description: "User session drop rate is {{ $value | humanizePercentage }}"
-
-      - alert: ProjectCreationFailures
-        expr: rate(project_creation_failures_total[10m]) > 0.05
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High project creation failure rate"
-          description: "Project creation failure rate is {{ $value }} per second"
+          summary: "Suspicious API activity"
+          description: "High request rate of {{ $value }} requests/second for 10 minutes"

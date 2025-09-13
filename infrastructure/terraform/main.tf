@@ -7,270 +7,506 @@ terraform {
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = "~> 2.0"
+      version = "~> 2.23"
     }
     helm = {
       source  = "hashicorp/helm"
-      version = "~> 2.0"
+      version = "~> 2.11"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.4"
     }
   }
 }
 
+# Configure the AWS Provider
 provider "aws" {
   region = var.aws_region
-}
 
-provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  token                  = data.aws_eks_cluster_auth.cluster.token
-}
-
-provider "helm" {
-  kubernetes {
-    host                   = module.eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    token                  = data.aws_eks_cluster_auth.cluster.token
+  default_tags {
+    tags = {
+      Environment = var.environment
+      Project     = "myco-platform"
+      ManagedBy   = "terraform"
+    }
   }
 }
 
+# Data sources
 data "aws_availability_zones" "available" {
-  filter {
-    name   = "opt-in-status"
-    values = ["opt-in-not-required"]
-  }
+  state = "available"
 }
 
-data "aws_eks_cluster_auth" "cluster" {
-  name = module.eks.cluster_name
+data "aws_caller_identity" "current" {}
+
+# Random password for databases
+resource "random_password" "db_passwords" {
+  for_each = toset(["postgres", "redis", "mongodb"])
+  length   = 16
+  special  = true
 }
 
-locals {
-  cluster_name = "myco-platform-${var.environment}"
-  azs          = slice(data.aws_availability_zones.available.names, 0, 3)
+# VPC and Networking
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_hostnames = true
+  enable_dns_support   = true
 
   tags = {
-    Environment = var.environment
-    Project     = "myco-platform"
-    ManagedBy   = "terraform"
+    Name = "${var.project_name}-vpc"
   }
 }
 
-# VPC
-module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
 
-  name = "${local.cluster_name}-vpc"
-  cidr = var.vpc_cidr
-
-  azs             = local.azs
-  private_subnets = [for k, v in local.azs : cidrsubnet(var.vpc_cidr, 4, k)]
-  public_subnets  = [for k, v in local.azs : cidrsubnet(var.vpc_cidr, 8, k + 48)]
-
-  enable_nat_gateway = true
-  enable_vpn_gateway = false
-  enable_dns_hostnames = true
-  enable_dns_support = true
-
-  public_subnet_tags = {
-    "kubernetes.io/role/elb" = "1"
+  tags = {
+    Name = "${var.project_name}-igw"
   }
-
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = "1"
-  }
-
-  tags = local.tags
 }
 
-# EKS Cluster
-module "eks" {
-  source = "terraform-aws-modules/eks/aws"
-  version = "~> 19.0"
+resource "aws_subnet" "public" {
+  count = min(length(data.aws_availability_zones.available.names), 3)
 
-  cluster_name    = local.cluster_name
-  cluster_version = var.kubernetes_version
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
 
-  vpc_id                         = module.vpc.vpc_id
-  subnet_ids                     = module.vpc.private_subnets
-  cluster_endpoint_public_access = true
-
-  # EKS Managed Node Groups
-  eks_managed_node_groups = {
-    main = {
-      min_size     = var.node_group_min_size
-      max_size     = var.node_group_max_size
-      desired_size = var.node_group_desired_size
-
-      instance_types = var.node_instance_types
-      capacity_type  = "ON_DEMAND"
-
-      k8s_labels = {
-        Environment = var.environment
-        NodeGroup   = "main"
-      }
-
-      update_config = {
-        max_unavailable_percentage = 33
-      }
-    }
+  tags = {
+    Name = "${var.project_name}-public-${count.index + 1}"
+    Type = "public"
   }
-
-  # Cluster access entries
-  access_entries = {
-    admin = {
-      kubernetes_groups = []
-      principal_arn     = var.cluster_admin_arn
-
-      policy_associations = {
-        admin = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
-  }
-
-  tags = local.tags
 }
 
-# RDS Instance for PostgreSQL
-resource "aws_db_subnet_group" "postgres" {
-  name       = "${local.cluster_name}-postgres"
-  subnet_ids = module.vpc.private_subnets
+resource "aws_subnet" "private" {
+  count = min(length(data.aws_availability_zones.available.names), 3)
 
-  tags = merge(local.tags, {
-    Name = "${local.cluster_name}-postgres"
-  })
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index + 10)
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+
+  tags = {
+    Name = "${var.project_name}-private-${count.index + 1}"
+    Type = "private"
+  }
 }
 
-resource "aws_security_group" "postgres" {
-  name_prefix = "${local.cluster_name}-postgres"
-  vpc_id      = module.vpc.vpc_id
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name = "${var.project_name}-public-rt"
+  }
+}
+
+resource "aws_route_table_association" "public" {
+  count = length(aws_subnet.public)
+
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+# NAT Gateway for private subnets
+resource "aws_eip" "nat" {
+  count = length(aws_subnet.public)
+
+  domain = "vpc"
+  depends_on = [aws_internet_gateway.main]
+
+  tags = {
+    Name = "${var.project_name}-nat-eip-${count.index + 1}"
+  }
+}
+
+resource "aws_nat_gateway" "main" {
+  count = length(aws_subnet.public)
+
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
+  depends_on    = [aws_internet_gateway.main]
+
+  tags = {
+    Name = "${var.project_name}-nat-${count.index + 1}"
+  }
+}
+
+resource "aws_route_table" "private" {
+  count = length(aws_subnet.private)
+
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.main[count.index].id
+  }
+
+  tags = {
+    Name = "${var.project_name}-private-rt-${count.index + 1}"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  count = length(aws_subnet.private)
+
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private[count.index].id
+}
+
+# Security Groups
+resource "aws_security_group" "eks_cluster" {
+  name_prefix = "${var.project_name}-eks-cluster"
+  vpc_id      = aws_vpc.main.id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-eks-cluster-sg"
+  }
+}
+
+resource "aws_security_group" "eks_nodes" {
+  name_prefix = "${var.project_name}-eks-nodes"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port = 0
+    to_port   = 65535
+    protocol  = "tcp"
+    self      = true
+  }
+
+  ingress {
+    from_port       = 1025
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_cluster.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-eks-nodes-sg"
+  }
+}
+
+resource "aws_security_group" "rds" {
+  name_prefix = "${var.project_name}-rds"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [module.eks.node_security_group_id]
+    security_groups = [aws_security_group.eks_nodes.id]
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  tags = {
+    Name = "${var.project_name}-rds-sg"
   }
-
-  tags = local.tags
 }
 
-resource "aws_db_instance" "postgres" {
-  identifier = "${local.cluster_name}-postgres"
-
-  engine               = "postgres"
-  engine_version       = "15"
-  instance_class       = var.db_instance_class
-  allocated_storage    = var.db_allocated_storage
-  max_allocated_storage = var.db_max_allocated_storage
-
-  db_name  = var.db_name
-  username = var.db_username
-  password = var.db_password
-
-  vpc_security_group_ids = [aws_security_group.postgres.id]
-  db_subnet_group_name   = aws_db_subnet_group.postgres.name
-
-  backup_retention_period = 7
-  backup_window          = "03:00-04:00"
-  maintenance_window     = "sun:04:00-sun:05:00"
-
-  skip_final_snapshot = var.environment != "production"
-  deletion_protection = var.environment == "production"
-
-  tags = local.tags
-}
-
-# ElastiCache Redis Cluster
-resource "aws_elasticache_subnet_group" "redis" {
-  name       = "${local.cluster_name}-redis"
-  subnet_ids = module.vpc.private_subnets
-
-  tags = local.tags
-}
-
-resource "aws_security_group" "redis" {
-  name_prefix = "${local.cluster_name}-redis"
-  vpc_id      = module.vpc.vpc_id
+resource "aws_security_group" "elasticache" {
+  name_prefix = "${var.project_name}-elasticache"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port       = 6379
     to_port         = 6379
     protocol        = "tcp"
-    security_groups = [module.eks.node_security_group_id]
+    security_groups = [aws_security_group.eks_nodes.id]
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  tags = {
+    Name = "${var.project_name}-elasticache-sg"
+  }
+}
+
+# IAM roles for EKS
+resource "aws_iam_role" "eks_cluster_role" {
+  name = "${var.project_name}-eks-cluster-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "eks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_cluster_role.name
+}
+
+resource "aws_iam_role" "eks_node_group_role" {
+  name = "${var.project_name}-eks-node-group-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_node_group_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_node_group_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_container_registry_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.eks_node_group_role.name
+}
+
+# EKS Cluster
+resource "aws_eks_cluster" "main" {
+  name     = "${var.project_name}-cluster"
+  role_arn = aws_iam_role.eks_cluster_role.arn
+  version  = var.kubernetes_version
+
+  vpc_config {
+    subnet_ids              = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
+    security_group_ids      = [aws_security_group.eks_cluster.id]
+    endpoint_private_access = true
+    endpoint_public_access  = true
   }
 
-  tags = local.tags
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_policy,
+  ]
+
+  tags = {
+    Name = "${var.project_name}-eks-cluster"
+  }
+}
+
+# EKS Node Group
+resource "aws_eks_node_group" "main" {
+  cluster_name    = aws_eks_cluster.main.name
+  node_group_name = "${var.project_name}-nodes"
+  node_role_arn   = aws_iam_role.eks_node_group_role.arn
+  subnet_ids      = aws_subnet.private[*].id
+
+  instance_types = var.node_instance_types
+  capacity_type  = "ON_DEMAND"
+
+  scaling_config {
+    desired_size = var.node_desired_capacity
+    max_size     = var.node_max_capacity
+    min_size     = var.node_min_capacity
+  }
+
+  update_config {
+    max_unavailable = 1
+  }
+
+  launch_template {
+    name    = aws_launch_template.eks_nodes.name
+    version = aws_launch_template.eks_nodes.latest_version
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_worker_node_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.eks_container_registry_policy,
+  ]
+
+  tags = {
+    Name = "${var.project_name}-eks-nodes"
+  }
+}
+
+# Launch template for EKS nodes
+resource "aws_launch_template" "eks_nodes" {
+  name_prefix   = "${var.project_name}-eks-nodes"
+  image_id      = data.aws_ami.eks_worker.id
+  instance_type = var.node_instance_types[0]
+
+  vpc_security_group_ids = [aws_security_group.eks_nodes.id]
+
+  user_data = base64encode(templatefile("${path.module}/user_data.sh", {
+    cluster_name        = aws_eks_cluster.main.name
+    endpoint            = aws_eks_cluster.main.endpoint
+    ca_certificate      = aws_eks_cluster.main.certificate_authority[0].data
+  }))
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.project_name}-eks-node"
+    }
+  }
+}
+
+# Data source for EKS worker AMI
+data "aws_ami" "eks_worker" {
+  filter {
+    name   = "name"
+    values = ["amazon-eks-node-${var.kubernetes_version}-v*"]
+  }
+
+  most_recent = true
+  owners      = ["602401143452"] # Amazon EKS AMI Account ID
+}
+
+# RDS PostgreSQL
+resource "aws_db_subnet_group" "main" {
+  name       = "${var.project_name}-db-subnet-group"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = {
+    Name = "${var.project_name}-db-subnet-group"
+  }
+}
+
+resource "aws_db_instance" "postgres" {
+  count = var.create_rds ? 1 : 0
+
+  identifier = "${var.project_name}-postgres"
+
+  allocated_storage       = var.db_allocated_storage
+  max_allocated_storage   = var.db_max_allocated_storage
+  storage_type            = "gp3"
+  storage_encrypted       = true
+
+  engine         = "postgres"
+  engine_version = var.postgres_version
+  instance_class = var.db_instance_class
+
+  db_name  = "myco_platform"
+  username = "postgres"
+  password = random_password.db_passwords["postgres"].result
+
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+
+  backup_retention_period = var.db_backup_retention_period
+  backup_window          = "03:00-04:00"
+  maintenance_window     = "sun:04:00-sun:05:00"
+
+  skip_final_snapshot = var.environment != "prod"
+  deletion_protection = var.environment == "prod"
+
+  performance_insights_enabled = true
+  monitoring_interval         = 60
+
+  tags = {
+    Name = "${var.project_name}-postgres"
+  }
+}
+
+# ElastiCache Redis
+resource "aws_elasticache_subnet_group" "main" {
+  name       = "${var.project_name}-cache-subnet"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = {
+    Name = "${var.project_name}-cache-subnet-group"
+  }
 }
 
 resource "aws_elasticache_replication_group" "redis" {
-  replication_group_id       = "${local.cluster_name}-redis"
-  description                = "Redis cluster for Myco Platform"
+  count = var.create_elasticache ? 1 : 0
 
-  node_type                  = var.redis_node_type
-  port                       = 6379
-  parameter_group_name       = "default.redis7"
+  replication_group_id       = "${var.project_name}-redis"
+  description                = "Redis cluster for ${var.project_name}"
 
-  num_cache_clusters         = var.redis_num_nodes
-  automatic_failover_enabled = var.redis_num_nodes > 1
+  node_type               = var.redis_node_type
+  port                    = 6379
+  parameter_group_name    = "default.redis7"
 
-  subnet_group_name  = aws_elasticache_subnet_group.redis.name
-  security_group_ids = [aws_security_group.redis.id]
+  num_cache_clusters      = var.redis_num_cache_nodes
+  automatic_failover_enabled = var.redis_num_cache_nodes > 1
+
+  subnet_group_name  = aws_elasticache_subnet_group.main.name
+  security_group_ids = [aws_security_group.elasticache.id]
 
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
+  auth_token                 = random_password.db_passwords["redis"].result
 
-  tags = local.tags
+  tags = {
+    Name = "${var.project_name}-redis"
+  }
 }
 
-# S3 Bucket for file storage
-resource "aws_s3_bucket" "storage" {
-  bucket = "${local.cluster_name}-storage"
+# S3 Buckets
+resource "aws_s3_bucket" "app_storage" {
+  bucket = "${var.project_name}-storage-${random_id.bucket_suffix.hex}"
 
-  tags = local.tags
+  tags = {
+    Name = "${var.project_name}-storage"
+  }
 }
 
-resource "aws_s3_bucket_versioning" "storage" {
-  bucket = aws_s3_bucket.storage.id
+resource "aws_s3_bucket" "backups" {
+  bucket = "${var.project_name}-backups-${random_id.bucket_suffix.hex}"
+
+  tags = {
+    Name = "${var.project_name}-backups"
+  }
+}
+
+resource "random_id" "bucket_suffix" {
+  byte_length = 4
+}
+
+resource "aws_s3_bucket_versioning" "app_storage" {
+  bucket = aws_s3_bucket.app_storage.id
   versioning_configuration {
     status = "Enabled"
   }
 }
 
-resource "aws_s3_bucket_encryption" "storage" {
-  bucket = aws_s3_bucket.storage.id
+resource "aws_s3_bucket_server_side_encryption_configuration" "app_storage" {
+  bucket = aws_s3_bucket.app_storage.id
 
-  server_side_encryption_configuration {
-    rule {
-      apply_server_side_encryption_by_default {
-        sse_algorithm = "AES256"
-      }
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
     }
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "storage" {
-  bucket = aws_s3_bucket.storage.id
+resource "aws_s3_bucket_public_access_block" "app_storage" {
+  bucket = aws_s3_bucket.app_storage.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -278,88 +514,54 @@ resource "aws_s3_bucket_public_access_block" "storage" {
   restrict_public_buckets = true
 }
 
-# IAM Role for EKS pods to access AWS services
-resource "aws_iam_role" "pod_role" {
-  name = "${local.cluster_name}-pod-role"
+# CloudWatch Log Groups
+resource "aws_cloudwatch_log_group" "eks_cluster" {
+  name              = "/aws/eks/${var.project_name}-cluster/cluster"
+  retention_in_days = 30
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Effect = "Allow"
-        Principal = {
-          Federated = module.eks.oidc_provider_arn
-        }
-        Condition = {
-          StringEquals = {
-            "${replace(module.eks.oidc_provider_arn, "/^(.*provider/)/", "")}:sub" = "system:serviceaccount:myco-platform:myco-pod-service-account"
-            "${replace(module.eks.oidc_provider_arn, "/^(.*provider/)/", "")}:aud" = "sts.amazonaws.com"
-          }
-        }
-      },
-    ]
-  })
-
-  tags = local.tags
+  tags = {
+    Name = "${var.project_name}-eks-logs"
+  }
 }
 
-resource "aws_iam_role_policy" "pod_policy" {
-  name = "${local.cluster_name}-pod-policy"
-  role = aws_iam_role.pod_role.id
+# ECR Repositories
+resource "aws_ecr_repository" "app_repos" {
+  for_each = toset(["backend", "ai-engine", "execution-engine", "frontend"])
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.storage.arn,
-          "${aws_s3_bucket.storage.arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue",
-          "secretsmanager:DescribeSecret"
-        ]
-        Resource = [
-          aws_secretsmanager_secret.api_keys.arn
-        ]
-      }
-    ]
-  })
+  name                 = "${var.project_name}-${each.key}"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = {
+    Name = "${var.project_name}-${each.key}"
+  }
 }
 
-# Secrets Manager for API keys
-resource "aws_secretsmanager_secret" "api_keys" {
-  name        = "${local.cluster_name}-api-keys"
-  description = "API keys for Myco Platform"
+# ALB for ingress
+resource "aws_lb" "main" {
+  count = var.create_alb ? 1 : 0
 
-  tags = local.tags
+  name               = "${var.project_name}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb[0].id]
+  subnets            = aws_subnet.public[*].id
+
+  enable_deletion_protection = var.environment == "prod"
+
+  tags = {
+    Name = "${var.project_name}-alb"
+  }
 }
 
-resource "aws_secretsmanager_secret_version" "api_keys" {
-  secret_id = aws_secretsmanager_secret.api_keys.id
-  secret_string = jsonencode({
-    openai_api_key    = var.openai_api_key
-    anthropic_api_key = var.anthropic_api_key
-    google_api_key    = var.google_api_key
-    clerk_secret_key  = var.clerk_secret_key
-  })
-}
-
-# Application Load Balancer
 resource "aws_security_group" "alb" {
-  name_prefix = "${local.cluster_name}-alb"
-  vpc_id      = module.vpc.vpc_id
+  count = var.create_alb ? 1 : 0
+
+  name_prefix = "${var.project_name}-alb"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port   = 80
@@ -382,134 +584,60 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = local.tags
-}
-
-# Kubernetes ServiceAccount
-resource "kubernetes_service_account" "pod_service_account" {
-  metadata {
-    name      = "myco-pod-service-account"
-    namespace = "myco-platform"
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.pod_role.arn
-    }
+  tags = {
+    Name = "${var.project_name}-alb-sg"
   }
-
-  depends_on = [module.eks]
 }
 
-# Kubernetes Namespace
-resource "kubernetes_namespace" "myco_platform" {
-  metadata {
-    name = "myco-platform"
-  }
-
-  depends_on = [module.eks]
+# Outputs
+output "cluster_id" {
+  description = "EKS cluster ID"
+  value       = aws_eks_cluster.main.id
 }
 
-# Install AWS Load Balancer Controller
-resource "helm_release" "aws_load_balancer_controller" {
-  name       = "aws-load-balancer-controller"
-  repository = "https://aws.github.io/eks-charts"
-  chart      = "aws-load-balancer-controller"
-  namespace  = "kube-system"
-  version    = "1.6.2"
-
-  set {
-    name  = "clusterName"
-    value = module.eks.cluster_name
-  }
-
-  set {
-    name  = "serviceAccount.create"
-    value = "false"
-  }
-
-  set {
-    name  = "serviceAccount.name"
-    value = "aws-load-balancer-controller"
-  }
-
-  depends_on = [
-    module.eks,
-    kubernetes_service_account.aws_load_balancer_controller
-  ]
+output "cluster_arn" {
+  description = "EKS cluster ARN"
+  value       = aws_eks_cluster.main.arn
 }
 
-resource "kubernetes_service_account" "aws_load_balancer_controller" {
-  metadata {
-    name      = "aws-load-balancer-controller"
-    namespace = "kube-system"
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.aws_load_balancer_controller.arn
-    }
-  }
-
-  depends_on = [module.eks]
-}
-
-resource "aws_iam_role" "aws_load_balancer_controller" {
-  name = "${local.cluster_name}-aws-load-balancer-controller"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Effect = "Allow"
-        Principal = {
-          Federated = module.eks.oidc_provider_arn
-        }
-        Condition = {
-          StringEquals = {
-            "${replace(module.eks.oidc_provider_arn, "/^(.*provider/)/", "")}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
-            "${replace(module.eks.oidc_provider_arn, "/^(.*provider/)/", "")}:aud" = "sts.amazonaws.com"
-          }
-        }
-      },
-    ]
-  })
-
-  tags = local.tags
-}
-
-resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
-  policy_arn = "arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess"
-  role       = aws_iam_role.aws_load_balancer_controller.name
-}
-
-# Output values
 output "cluster_endpoint" {
   description = "Endpoint for EKS control plane"
-  value       = module.eks.cluster_endpoint
+  value       = aws_eks_cluster.main.endpoint
 }
 
 output "cluster_security_group_id" {
   description = "Security group ids attached to the cluster control plane"
-  value       = module.eks.cluster_security_group_id
+  value       = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
 }
 
-output "cluster_name" {
-  description = "Kubernetes Cluster Name"
-  value       = module.eks.cluster_name
+output "vpc_id" {
+  description = "ID of the VPC where the cluster and workers are deployed"
+  value       = aws_vpc.main.id
 }
 
-output "region" {
-  description = "AWS region"
-  value       = var.aws_region
-}
-
-output "database_endpoint" {
-  description = "RDS instance endpoint"
-  value       = aws_db_instance.postgres.endpoint
+output "postgres_endpoint" {
+  description = "PostgreSQL instance endpoint"
+  value       = var.create_rds ? aws_db_instance.postgres[0].endpoint : null
+  sensitive   = true
 }
 
 output "redis_endpoint" {
-  description = "ElastiCache Redis endpoint"
-  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
+  description = "Redis cluster endpoint"
+  value       = var.create_elasticache ? aws_elasticache_replication_group.redis[0].primary_endpoint_address : null
+  sensitive   = true
 }
 
-output "s3_bucket_name" {
-  description = "S3 bucket name for file storage"
-  value       = aws_s3_bucket.storage.bucket
+output "s3_bucket_names" {
+  description = "Names of the S3 buckets"
+  value = {
+    storage = aws_s3_bucket.app_storage.bucket
+    backups = aws_s3_bucket.backups.bucket
+  }
+}
+
+output "ecr_repositories" {
+  description = "ECR repository URLs"
+  value = {
+    for k, v in aws_ecr_repository.app_repos : k => v.repository_url
+  }
 }

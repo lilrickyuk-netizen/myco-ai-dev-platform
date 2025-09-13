@@ -1,5 +1,7 @@
-FROM node:18-alpine AS base
+# Frontend Dockerfile - React + Vite Application
+FROM node:18-alpine AS builder
 
+# Set working directory
 WORKDIR /app
 
 # Copy package files
@@ -11,27 +13,24 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Development stage
-FROM base AS development
-EXPOSE 5173
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
-
-# Build stage
-FROM base AS build
+# Build the application
 RUN npm run build
 
 # Production stage
-FROM nginx:alpine AS production
+FROM nginx:alpine
 
-# Copy built assets
-COPY --from=build /app/dist /usr/share/nginx/html
+# Copy build files
+COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Copy nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Expose port
+EXPOSE 80
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:80/ || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:80 || exit 1
 
-EXPOSE 80
+# Start nginx
 CMD ["nginx", "-g", "daemon off;"]

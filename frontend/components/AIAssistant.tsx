@@ -426,31 +426,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
   );
 };
 
-export default AIAssistant;import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Code, Lightbulb, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useBackend } from "../hooks/useBackend";
-import { useToast } from "@/components/ui/use-toast";
-import type { FileNode } from "~backend/filesystem/types";
-
-interface AIAssistantProps {
-  projectId: string;
-  currentFile: FileNode | null;
-  onCodeGenerated: (code: string) => void;
-}
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-  type?: "text" | "code";
-}
-
-export function AIAssistant({ projectId, currentFile, onCodeGenerated }: AIAssistantProps) {
+export { AIAssistant };
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",

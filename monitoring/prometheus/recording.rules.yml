@@ -1,130 +1,133 @@
-# Recording Rules for Hybrid Development Platform
 groups:
-  - name: hybrid-dev-platform-recording
+  - name: myco_platform_recording_rules
     interval: 30s
     rules:
-      # HTTP Request Rate
-      - record: http_requests_per_second
+      # Request rate rules
+      - record: myco:request_rate_5m
         expr: rate(http_requests_total[5m])
 
-      # HTTP Error Rate
-      - record: http_error_rate
-        expr: rate(http_requests_total{status=~"4.."}[5m]) + rate(http_requests_total{status=~"5.."}[5m])
+      - record: myco:error_rate_5m
+        expr: rate(http_requests_total{code=~"5.."}[5m])
 
-      # HTTP Success Rate
-      - record: http_success_rate
-        expr: rate(http_requests_total{status=~"2.."}[5m])
+      - record: myco:error_ratio_5m
+        expr: |
+          rate(http_requests_total{code=~"5.."}[5m])
+          /
+          rate(http_requests_total[5m])
 
-      # API Response Times
-      - record: api_response_time_95th
+      # Latency rules
+      - record: myco:request_latency_95th_5m
         expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
 
-      - record: api_response_time_99th
+      - record: myco:request_latency_99th_5m
         expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
 
-      - record: api_response_time_50th
-        expr: histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))
+      - record: myco:request_latency_median_5m
+        expr: histogram_quantile(0.5, rate(http_request_duration_seconds_bucket[5m]))
 
-      # System Resource Utilization
-      - record: cpu_utilization_percent
-        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+      # Service-specific rules
+      - record: myco:backend_request_rate_5m
+        expr: rate(http_requests_total{job="backend"}[5m])
 
-      - record: memory_utilization_percent
-        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+      - record: myco:ai_engine_request_rate_5m
+        expr: rate(http_requests_total{job="ai-engine"}[5m])
 
-      - record: disk_utilization_percent
-        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100
+      - record: myco:execution_engine_request_rate_5m
+        expr: rate(http_requests_total{job="execution-engine"}[5m])
 
-      # Application-specific metrics
-      - record: ai_engine_requests_per_second
-        expr: rate(ai_engine_requests_total[5m])
+      # AI-specific rules
+      - record: myco:llm_token_usage_rate_5m
+        expr: rate(ai_engine_llm_tokens_total[5m])
 
-      - record: ai_engine_processing_time_avg
-        expr: rate(ai_engine_processing_time_seconds_sum[5m]) / rate(ai_engine_processing_time_seconds_count[5m])
-
-      - record: execution_engine_containers_active
-        expr: execution_engine_containers_total{status="running"}
-
-      - record: deployment_success_rate
-        expr: rate(deployment_successes_total[10m]) / (rate(deployment_successes_total[10m]) + rate(deployment_failures_total[10m]))
-
-      # Database Performance
-      - record: db_queries_per_second
-        expr: rate(pg_stat_statements_calls[5m])
-
-      - record: db_query_time_avg
-        expr: rate(pg_stat_statements_total_time_ms[5m]) / rate(pg_stat_statements_calls[5m])
-
-      - record: db_connections_active
-        expr: pg_stat_activity_count
-
-      # Redis Performance
-      - record: redis_operations_per_second
-        expr: rate(redis_commands_processed_total[5m])
-
-      - record: redis_memory_usage_percent
-        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100
-
-      # Container Metrics
-      - record: container_cpu_usage_percent
-        expr: rate(container_cpu_usage_seconds_total[5m]) * 100
-
-      - record: container_memory_usage_percent
-        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100
-
-      # Business Metrics
-      - record: active_users_current
-        expr: sum(user_sessions_active)
-
-      - record: projects_created_per_hour
-        expr: rate(project_creation_successes_total[1h]) * 3600
-
-      - record: code_executions_per_minute
-        expr: rate(code_executions_total[1m]) * 60
-
-      - record: deployments_per_hour
-        expr: rate(deployment_successes_total[1h]) * 3600
-
-      # Platform Health Score
-      - record: platform_health_score
+      - record: myco:llm_cost_estimate_5m
         expr: |
           (
-            (up * 10) +
-            (clamp_max(100 - http_error_rate * 100, 100) / 10) +
-            (clamp_max(100 - cpu_utilization_percent, 100) / 10) +
-            (clamp_max(100 - memory_utilization_percent, 100) / 10) +
-            (clamp_max(deployment_success_rate * 100, 100) / 10)
-          ) / 5
+            rate(ai_engine_llm_tokens_total{type="prompt"}[5m]) * 0.03 / 1000 +
+            rate(ai_engine_llm_tokens_total{type="completion"}[5m]) * 0.06 / 1000
+          )
 
-  - name: aggregated-metrics
-    interval: 1m
-    rules:
-      # Cluster-wide aggregations
-      - record: cluster_cpu_usage_avg
-        expr: avg(cpu_utilization_percent)
-
-      - record: cluster_memory_usage_avg
-        expr: avg(memory_utilization_percent)
-
-      - record: cluster_requests_per_second_total
-        expr: sum(http_requests_per_second)
-
-      - record: cluster_error_rate_avg
-        expr: avg(http_error_rate)
-
-      # Service-level aggregations
-      - record: service_availability_percent
-        expr: avg by (job) (up) * 100
-
-      - record: service_response_time_p95
-        expr: histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m])))
-
-      - record: service_throughput
-        expr: sum by (job) (rate(http_requests_total[5m]))
-
-      # Cross-service dependency health
-      - record: dependency_health_score
+      - record: myco:agent_session_success_rate_5m
         expr: |
-          min by (service) (
-            avg by (service) (up{job=~"postgres|redis|mongodb|elasticsearch"})
-          ) * 100
+          rate(ai_engine_agent_sessions_total{status="completed"}[5m])
+          /
+          rate(ai_engine_agent_sessions_total[5m])
+
+      # Execution engine rules
+      - record: myco:code_execution_rate_5m
+        expr: rate(execution_engine_jobs_total[5m])
+
+      - record: myco:code_execution_success_rate_5m
+        expr: |
+          rate(execution_engine_jobs_total{status="completed"}[5m])
+          /
+          rate(execution_engine_jobs_total[5m])
+
+      - record: myco:execution_queue_depth
+        expr: execution_engine_queue_length
+
+      # Resource utilization rules
+      - record: myco:cpu_utilization
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+      - record: myco:memory_utilization
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+
+      - record: myco:disk_utilization
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100
+
+      # Database rules
+      - record: myco:postgres_connections_utilization
+        expr: |
+          (sum by (instance) (pg_stat_activity_count))
+          /
+          (sum by (instance) (pg_settings_max_connections))
+
+      - record: myco:redis_memory_utilization
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100
+
+      # Business metrics
+      - record: myco:active_users_5m
+        expr: count(increase(user_requests_total[5m]) > 0)
+
+      - record: myco:projects_created_rate_1h
+        expr: rate(myco_projects_created_total[1h])
+
+      - record: myco:files_created_rate_5m
+        expr: rate(myco_files_created_total[5m])
+
+      # SLA metrics
+      - record: myco:availability_5m
+        expr: |
+          (
+            sum(rate(http_requests_total[5m])) - 
+            sum(rate(http_requests_total{code=~"5.."}[5m]))
+          )
+          /
+          sum(rate(http_requests_total[5m]))
+
+      - record: myco:p95_latency_sla_5m
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) < 2
+
+      # Container and orchestration rules
+      - record: myco:container_cpu_usage
+        expr: rate(container_cpu_usage_seconds_total[5m])
+
+      - record: myco:container_memory_usage
+        expr: container_memory_working_set_bytes
+
+      - record: myco:pod_restart_rate_5m
+        expr: rate(kube_pod_container_status_restarts_total[5m])
+
+      # Security metrics
+      - record: myco:auth_failure_rate_5m
+        expr: rate(auth_failures_total[5m])
+
+      - record: myco:rate_limit_violations_5m
+        expr: rate(rate_limit_violations_total[5m])
+
+      # Frontend metrics (if available)
+      - record: myco:frontend_error_rate_5m
+        expr: rate(frontend_errors_total[5m])
+
+      - record: myco:page_load_time_95th_5m
+        expr: histogram_quantile(0.95, rate(frontend_page_load_duration_seconds_bucket[5m]))

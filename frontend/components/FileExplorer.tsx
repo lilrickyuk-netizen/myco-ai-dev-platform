@@ -389,7 +389,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   );
 };
 
-export default FileExplorer;import { useState, useRef } from "react";
+export { FileExplorer };
 import { 
   ChevronRight, 
   ChevronDown, 
