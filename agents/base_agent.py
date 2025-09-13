@@ -7,6 +7,9 @@ from enum import Enum
 from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
 
+from .llm_adapter import LLMManager, LLMMessage, LLMResponse, llm_manager
+from .config import config
+
 class AgentStatus(Enum):
     IDLE = "idle"
     WORKING = "working"

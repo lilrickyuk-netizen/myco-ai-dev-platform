@@ -3,7 +3,8 @@ import json
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-from .base_agent import BaseAgent, AgentType, Task, TaskPriority, AgentExecutionContext, AgentStatus
+from ..base_agent import BaseAgent, AgentType, Task, TaskPriority, AgentExecutionContext, AgentStatus
+import uuid
 
 class OrchestratorAgent(BaseAgent):
     def __init__(self):
