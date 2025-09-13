@@ -1,0 +1,72 @@
+import { api } from "encore.dev/api";
+
+export interface HealthResponse {
+  status: "healthy" | "unhealthy";
+  timestamp: string;
+  service: string;
+  version: string;
+  uptime: number;
+  dependencies: {
+    [key: string]: {
+      status: "healthy" | "unhealthy";
+      responseTime?: number;
+      error?: string;
+    };
+  };
+}
+
+export const health = api(
+  { expose: true, method: "GET", path: "/health" },
+  async (): Promise<HealthResponse> => {
+    const startTime = Date.now();
+    
+    // Check AI engine dependency
+    const aiEngineStatus = await checkAIEngineHealth();
+    
+    const dependencies = {
+      aiEngine: aiEngineStatus,
+    };
+
+    const allHealthy = Object.values(dependencies).every(dep => dep.status === "healthy");
+    
+    return {
+      status: allHealthy ? "healthy" : "unhealthy",
+      timestamp: new Date().toISOString(),
+      service: "ai",
+      version: "1.0.0",
+      uptime: process.uptime(),
+      dependencies,
+    };
+  }
+);
+
+async function checkAIEngineHealth(): Promise<{ status: "healthy" | "unhealthy"; responseTime?: number; error?: string }> {
+  const startTime = Date.now();
+  
+  try {
+    const aiEngineUrl = process.env.AI_ENGINE_URL || 'http://localhost:8001';
+    const response = await fetch(`${aiEngineUrl}/health/ping`, {
+      method: 'GET',
+      timeout: 5000, // 5 second timeout
+    });
+    
+    const responseTime = Date.now() - startTime;
+    
+    if (response.ok) {
+      return {
+        status: "healthy",
+        responseTime,
+      };
+    } else {
+      return {
+        status: "unhealthy",
+        error: `AI Engine returned ${response.status}: ${response.statusText}`,
+      };
+    }
+  } catch (error) {
+    return {
+      status: "unhealthy",
+      error: error instanceof Error ? error.message : "AI Engine connection failed",
+    };
+  }
+}

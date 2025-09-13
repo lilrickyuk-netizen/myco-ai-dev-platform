@@ -1,620 +1,543 @@
-/**
- * Enhanced Docker Manager - Secure sandboxed code execution
- */
-
-import Docker from 'dockerode';
 import { EventEmitter } from 'events';
+import { DockerManager, ContainerConfig, ContainerInfo, ExecutionResult } from './DockerManager';
+import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import { createHash } from 'crypto';
+import { join } from 'path';
 
-export interface ExecutionRequest {
-  id: string;
+export interface JobConfig {
+  id?: string;
+  name: string;
+  image: string;
   code: string;
   language: string;
-  files?: { [filename: string]: string };
-  dependencies?: string[];
-  environment?: { [key: string]: string };
+  framework?: string;
+  entrypoint?: string[];
   timeout?: number;
   memoryLimit?: string;
   cpuLimit?: number;
-  networkAccess?: boolean;
-  allowedPorts?: number[];
-  userId?: string;
-  projectId?: string;
+  environment?: Record<string, string>;
+  inputFiles?: Array<{ path: string; content: string }>;
+  expectedOutputs?: string[];
 }
 
-export interface ExecutionResult {
+export interface JobResult {
   id: string;
-  success: boolean;
+  status: 'success' | 'error' | 'timeout';
   output: string;
   error?: string;
   exitCode: number;
-  executionTime: number;
+  duration: number;
   memoryUsage?: number;
-  logs: string[];
-  files?: { [filename: string]: string };
-  metadata: {
-    containerId?: string;
-    imageUsed: string;
-    securityProfile: string;
-    resourceLimits: any;
-  };
+  cpuUsage?: number;
+  outputFiles?: Array<{ path: string; content: string }>;
 }
 
-export interface SecurityProfile {
-  allowNetworking: boolean;
-  allowFileSystem: boolean;
-  allowedSyscalls: string[];
-  blockedSyscalls: string[];
-  maxProcesses: number;
-  memoryLimit: string;
-  cpuLimit: number;
-  timeoutSeconds: number;
+export interface LanguageRuntime {
+  image: string;
+  setup: string[];
+  run: string[];
+  fileExtension: string;
+  packages?: Record<string, string>;
 }
 
 export class EnhancedDockerManager extends EventEmitter {
-  private docker: Docker;
-  private activeContainers: Map<string, Docker.Container> = new Map();
-  private executionQueue: ExecutionRequest[] = [];
-  private isProcessingQueue = false;
-  private securityProfiles: Map<string, SecurityProfile>;
+  private dockerManager: DockerManager;
+  private activeJobs: Map<string, { containerId: string; timeout?: NodeJS.Timeout }> = new Map();
+  private jobQueue: JobConfig[] = [];
+  private maxConcurrentJobs: number = 5;
+  private currentJobs: number = 0;
   
-  // Language configurations
-  private languageConfigs = {
+  // Language runtime configurations
+  private languageRuntimes: Record<string, LanguageRuntime> = {
     javascript: {
       image: 'node:18-alpine',
-      command: ['node'],
-      fileExtension: '.js',
-      setupCommands: ['npm install']
+      setup: ['npm install'],
+      run: ['node', 'main.js'],
+      fileExtension: 'js',
+      packages: {
+        'package.json': JSON.stringify({
+          name: 'user-code',
+          version: '1.0.0',
+          main: 'main.js',
+          dependencies: {}
+        }, null, 2)
+      }
     },
     typescript: {
       image: 'node:18-alpine',
-      command: ['npx', 'tsx'],
-      fileExtension: '.ts',
-      setupCommands: ['npm install', 'npm install -g tsx']
+      setup: [
+        'npm install -g typescript ts-node',
+        'npm install @types/node',
+        'npm install'
+      ],
+      run: ['npx', 'ts-node', 'main.ts'],
+      fileExtension: 'ts',
+      packages: {
+        'package.json': JSON.stringify({
+          name: 'user-code',
+          version: '1.0.0',
+          main: 'main.ts',
+          dependencies: {
+            '@types/node': '^18.0.0'
+          }
+        }, null, 2),
+        'tsconfig.json': JSON.stringify({
+          compilerOptions: {
+            target: 'es2020',
+            module: 'commonjs',
+            strict: true,
+            esModuleInterop: true,
+            skipLibCheck: true,
+            forceConsistentCasingInFileNames: true
+          }
+        }, null, 2)
+      }
     },
     python: {
-      image: 'python:3.11-slim',
-      command: ['python'],
-      fileExtension: '.py',
-      setupCommands: ['pip install -r requirements.txt']
-    },
-    java: {
-      image: 'openjdk:17-alpine',
-      command: ['java'],
-      fileExtension: '.java',
-      setupCommands: ['javac *.java']
+      image: 'python:3.11-alpine',
+      setup: ['pip install -r requirements.txt || true'],
+      run: ['python', 'main.py'],
+      fileExtension: 'py',
+      packages: {
+        'requirements.txt': 'requests\nnumpy\npandas'
+      }
     },
     go: {
       image: 'golang:1.21-alpine',
-      command: ['go', 'run'],
-      fileExtension: '.go',
-      setupCommands: ['go mod init main', 'go mod tidy']
+      setup: ['go mod init user-code', 'go mod tidy'],
+      run: ['go', 'run', 'main.go'],
+      fileExtension: 'go',
+      packages: {
+        'go.mod': 'module user-code\n\ngo 1.21'
+      }
     },
     rust: {
-      image: 'rust:1.75-slim',
-      command: ['cargo', 'run'],
-      fileExtension: '.rs',
-      setupCommands: ['cargo init --name main .']
+      image: 'rust:1.75-alpine',
+      setup: ['cargo build'],
+      run: ['cargo', 'run'],
+      fileExtension: 'rs',
+      packages: {
+        'Cargo.toml': `[package]
+name = "user-code"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]`,
+        'src/main.rs': '// Placeholder - will be replaced with user code'
+      }
+    },
+    java: {
+      image: 'openjdk:17-alpine',
+      setup: ['javac Main.java'],
+      run: ['java', 'Main'],
+      fileExtension: 'java',
+      packages: {}
+    },
+    cpp: {
+      image: 'gcc:latest',
+      setup: ['g++ -o main main.cpp'],
+      run: ['./main'],
+      fileExtension: 'cpp',
+      packages: {}
     }
   };
 
-  constructor() {
+  constructor(tempDir: string = '/tmp/enhanced-docker-manager') {
     super();
-    this.docker = new Docker();
-    this.initializeSecurityProfiles();
-    this.startQueueProcessor();
+    this.dockerManager = new DockerManager(tempDir);
+    this.setupEventHandlers();
+    this.startJobProcessor();
   }
 
-  private initializeSecurityProfiles() {
-    this.securityProfiles = new Map([
-      ['strict', {
-        allowNetworking: false,
-        allowFileSystem: false,
-        allowedSyscalls: ['read', 'write', 'open', 'close', 'mmap', 'exit'],
-        blockedSyscalls: ['socket', 'connect', 'fork', 'exec'],
-        maxProcesses: 1,
-        memoryLimit: '128m',
-        cpuLimit: 0.5,
-        timeoutSeconds: 30
-      }],
-      ['sandbox', {
-        allowNetworking: false,
-        allowFileSystem: true,
-        allowedSyscalls: ['read', 'write', 'open', 'close', 'mmap', 'exit', 'stat'],
-        blockedSyscalls: ['socket', 'connect', 'fork'],
-        maxProcesses: 5,
-        memoryLimit: '256m',
-        cpuLimit: 1.0,
-        timeoutSeconds: 60
-      }],
-      ['development', {
-        allowNetworking: true,
-        allowFileSystem: true,
-        allowedSyscalls: [],
-        blockedSyscalls: ['reboot', 'mount'],
-        maxProcesses: 10,
-        memoryLimit: '512m',
-        cpuLimit: 2.0,
-        timeoutSeconds: 300
-      }]
-    ]);
+  private setupEventHandlers(): void {
+    this.dockerManager.on('containerCreated', (container: ContainerInfo) => {
+      this.emit('jobStarted', container);
+    });
+
+    this.dockerManager.on('containerStopped', (container: ContainerInfo) => {
+      this.emit('jobStopped', container);
+    });
+
+    this.dockerManager.on('containerError', (container: ContainerInfo, error: any) => {
+      this.emit('jobError', container, error);
+    });
   }
 
-  async executeCode(request: ExecutionRequest): Promise<ExecutionResult> {
-    const startTime = Date.now();
-    
-    try {
-      // Validate request
-      this.validateExecutionRequest(request);
-      
-      // Create execution environment
-      const container = await this.createSecureContainer(request);
-      this.activeContainers.set(request.id, container);
-      
-      // Prepare workspace
-      await this.prepareWorkspace(container, request);
-      
-      // Execute code
-      const result = await this.runCodeInContainer(container, request);
-      
-      // Collect results and cleanup
-      const files = await this.collectOutputFiles(container);
-      await this.cleanupContainer(request.id);
-      
-      const executionTime = Date.now() - startTime;
-      
-      const executionResult: ExecutionResult = {
-        id: request.id,
-        success: result.exitCode === 0,
-        output: result.output,
-        error: result.error,
-        exitCode: result.exitCode,
-        executionTime,
-        logs: result.logs,
-        files,
-        metadata: {
-          containerId: container.id,
-          imageUsed: this.getImageForLanguage(request.language),
-          securityProfile: this.getSecurityProfileName(request),
-          resourceLimits: this.getResourceLimits(request)
+  private startJobProcessor(): void {
+    setInterval(() => {
+      this.processJobQueue();
+    }, 1000);
+  }
+
+  private async processJobQueue(): Promise<void> {
+    if (this.currentJobs >= this.maxConcurrentJobs || this.jobQueue.length === 0) {
+      return;
+    }
+
+    const job = this.jobQueue.shift();
+    if (job) {
+      this.currentJobs++;
+      this.executeJob(job).finally(() => {
+        this.currentJobs--;
+      });
+    }
+  }
+
+  async executeCode(jobConfig: JobConfig): Promise<JobResult> {
+    return new Promise((resolve, reject) => {
+      const jobId = jobConfig.id || randomUUID();
+      jobConfig.id = jobId;
+
+      // Add to queue
+      this.jobQueue.push(jobConfig);
+
+      // Listen for job completion
+      const onJobComplete = (result: JobResult) => {
+        if (result.id === jobId) {
+          this.removeListener('jobComplete', onJobComplete);
+          this.removeListener('jobError', onJobError);
+          resolve(result);
         }
       };
+
+      const onJobError = (error: any, jId: string) => {
+        if (jId === jobId) {
+          this.removeListener('jobComplete', onJobComplete);
+          this.removeListener('jobError', onJobError);
+          reject(error);
+        }
+      };
+
+      this.on('jobComplete', onJobComplete);
+      this.on('jobError', onJobError);
+
+      // Set overall timeout
+      setTimeout(() => {
+        this.removeListener('jobComplete', onJobComplete);
+        this.removeListener('jobError', onJobError);
+        this.cancelJob(jobId);
+        reject(new Error('Job timeout exceeded'));
+      }, (jobConfig.timeout || 300) * 1000);
+    });
+  }
+
+  private async executeJob(jobConfig: JobConfig): Promise<void> {
+    const startTime = Date.now();
+    const jobId = jobConfig.id!;
+
+    try {
+      // Prepare runtime configuration
+      const runtime = this.languageRuntimes[jobConfig.language];
+      if (!runtime) {
+        throw new Error(`Unsupported language: ${jobConfig.language}`);
+      }
+
+      // Create container configuration
+      const containerConfig: ContainerConfig = {
+        image: runtime.image,
+        name: `job-${jobId}`,
+        workingDir: '/workspace',
+        memory: jobConfig.memoryLimit || '512m',
+        cpu: jobConfig.cpuLimit || 1,
+        environment: {
+          NODE_ENV: 'production',
+          PYTHONUNBUFFERED: '1',
+          ...jobConfig.environment
+        },
+        capabilities: ['SYS_ADMIN'], // Needed for some operations
+        securityOpts: ['seccomp:unconfined'], // Allow system calls
+        networkMode: 'none' // Disable network access for security
+      };
+
+      // Create container
+      const containerId = await this.dockerManager.createContainer(containerConfig);
       
-      this.emit('executionComplete', executionResult);
-      return executionResult;
-      
+      // Store job reference
+      this.activeJobs.set(jobId, { containerId });
+
+      // Setup workspace
+      await this.setupWorkspace(containerId, jobConfig, runtime);
+
+      // Execute code
+      const result = await this.runCode(containerId, jobConfig, runtime);
+
+      // Collect outputs
+      const outputFiles = await this.collectOutputs(containerId, jobConfig);
+
+      // Calculate duration
+      const duration = (Date.now() - startTime) / 1000;
+
+      // Create result
+      const jobResult: JobResult = {
+        id: jobId,
+        status: result.exitCode === 0 ? 'success' : 'error',
+        output: result.stdout,
+        error: result.stderr || undefined,
+        exitCode: result.exitCode,
+        duration,
+        memoryUsage: result.memoryUsage,
+        cpuUsage: result.cpuUsage,
+        outputFiles
+      };
+
+      // Clean up
+      await this.cleanupJob(jobId);
+
+      this.emit('jobComplete', jobResult);
+
     } catch (error) {
-      await this.cleanupContainer(request.id);
-      
-      const executionResult: ExecutionResult = {
-        id: request.id,
-        success: false,
+      // Clean up on error
+      await this.cleanupJob(jobId);
+
+      const jobResult: JobResult = {
+        id: jobId,
+        status: 'error',
         output: '',
         error: error instanceof Error ? error.message : 'Unknown error',
-        exitCode: -1,
-        executionTime: Date.now() - startTime,
-        logs: [],
-        metadata: {
-          imageUsed: this.getImageForLanguage(request.language),
-          securityProfile: this.getSecurityProfileName(request),
-          resourceLimits: this.getResourceLimits(request)
-        }
+        exitCode: 1,
+        duration: (Date.now() - startTime) / 1000
       };
-      
-      this.emit('executionError', executionResult);
-      return executionResult;
+
+      this.emit('jobComplete', jobResult);
     }
   }
 
-  private validateExecutionRequest(request: ExecutionRequest): void {
-    if (!request.id) {
-      throw new Error('Execution request must have an ID');
-    }
-    
-    if (!request.code || request.code.trim().length === 0) {
-      throw new Error('Execution request must contain code');
-    }
-    
-    if (!this.languageConfigs[request.language]) {
-      throw new Error(`Unsupported language: ${request.language}`);
-    }
-    
-    if (request.code.length > 1024 * 1024) { // 1MB limit
-      throw new Error('Code size exceeds maximum limit');
-    }
-  }
+  private async setupWorkspace(
+    containerId: string, 
+    jobConfig: JobConfig, 
+    runtime: LanguageRuntime
+  ): Promise<void> {
+    // Create workspace directory
+    await this.dockerManager.executeCommand(containerId, ['mkdir', '-p', '/workspace']);
 
-  private async createSecureContainer(request: ExecutionRequest): Promise<Docker.Container> {
-    const image = this.getImageForLanguage(request.language);
-    const securityProfile = this.getSecurityProfile(request);
-    
-    // Ensure image is available
-    await this.ensureImage(image);
-    
-    // Create container with security constraints
-    const containerConfig = {
-      Image: image,
-      WorkingDir: '/workspace',
-      User: 'nobody:nogroup',
-      NetworkMode: securityProfile.allowNetworking ? 'bridge' : 'none',
-      HostConfig: {
-        Memory: this.parseMemoryLimit(securityProfile.memoryLimit),
-        CpuQuota: Math.floor(securityProfile.cpuLimit * 100000),
-        CpuPeriod: 100000,
-        PidsLimit: securityProfile.maxProcesses,
-        ReadonlyRootfs: true,
-        SecurityOpt: [
-          'no-new-privileges:true',
-          'seccomp:default' // Use default seccomp profile for security
-        ],
-        CapDrop: ['ALL'],
-        CapAdd: ['SETUID', 'SETGID'], // Minimal capabilities
-        Tmpfs: {
-          '/tmp': 'rw,size=100m,uid=65534,gid=65534',
-          '/workspace': 'rw,size=500m,uid=65534,gid=65534'
-        },
-        Ulimits: [
-          { Name: 'nproc', Soft: securityProfile.maxProcesses, Hard: securityProfile.maxProcesses },
-          { Name: 'nofile', Soft: 1024, Hard: 1024 }
-        ]
-      },
-      Env: this.buildEnvironmentVariables(request),
-      AttachStdout: true,
-      AttachStderr: true,
-      Tty: false
-    };
-
-    return await this.docker.createContainer(containerConfig);
-  }
-
-  private async ensureImage(image: string): Promise<void> {
-    try {
-      await this.docker.getImage(image).inspect();
-    } catch (error) {
-      console.log(`Pulling image: ${image}`);
-      await new Promise((resolve, reject) => {
-        this.docker.pull(image, (err: any, stream: any) => {
-          if (err) return reject(err);
-          
-          this.docker.modem.followProgress(stream, (err: any, res: any) => {
-            if (err) return reject(err);
-            resolve(res);
-          });
-        });
-      });
+    // Create package files
+    for (const [fileName, content] of Object.entries(runtime.packages || {})) {
+      await this.dockerManager.createFileInContainer(
+        containerId,
+        `/workspace/${fileName}`,
+        content
+      );
     }
-  }
 
-  private async prepareWorkspace(container: Docker.Container, request: ExecutionRequest): Promise<void> {
-    await container.start();
-    
-    const languageConfig = this.languageConfigs[request.language];
-    
     // Create main code file
-    const mainFile = `main${languageConfig.fileExtension}`;
-    await this.writeFileToContainer(container, mainFile, request.code);
+    const mainFileName = jobConfig.language === 'rust' 
+      ? `src/main.${runtime.fileExtension}`
+      : `main.${runtime.fileExtension}`;
     
-    // Write additional files
-    if (request.files) {
-      for (const [filename, content] of Object.entries(request.files)) {
-        await this.writeFileToContainer(container, filename, content);
-      }
-    }
-    
-    // Setup dependencies
-    if (request.dependencies && request.dependencies.length > 0) {
-      await this.installDependencies(container, request);
-    }
-  }
-
-  private async writeFileToContainer(container: Docker.Container, filename: string, content: string): Promise<void> {
-    const tar = require('tar-stream');
-    const pack = tar.pack();
-    
-    pack.entry({ name: filename }, content);
-    pack.finalize();
-    
-    await container.putArchive(pack, { path: '/workspace' });
-  }
-
-  private async installDependencies(container: Docker.Container, request: ExecutionRequest): Promise<void> {
-    const languageConfig = this.languageConfigs[request.language];
-    
-    if (request.language === 'javascript' || request.language === 'typescript') {
-      const packageJson = {
-        name: 'workspace',
-        version: '1.0.0',
-        dependencies: request.dependencies?.reduce((acc, dep) => {
-          acc[dep] = 'latest';
-          return acc;
-        }, {} as any) || {}
-      };
-      
-      await this.writeFileToContainer(container, 'package.json', JSON.stringify(packageJson, null, 2));
-    } else if (request.language === 'python') {
-      const requirements = request.dependencies?.join('\n') || '';
-      await this.writeFileToContainer(container, 'requirements.txt', requirements);
-    }
-    
-    // Run setup commands
-    for (const command of languageConfig.setupCommands) {
-      await this.execInContainer(container, command.split(' '));
-    }
-  }
-
-  private async runCodeInContainer(container: Docker.Container, request: ExecutionRequest): Promise<{
-    output: string;
-    error: string;
-    exitCode: number;
-    logs: string[];
-  }> {
-    const languageConfig = this.languageConfigs[request.language];
-    const timeout = request.timeout || this.getSecurityProfile(request).timeoutSeconds * 1000;
-    
-    const command = [
-      ...languageConfig.command,
-      `main${languageConfig.fileExtension}`
-    ];
-    
-    return new Promise(async (resolve) => {
-      const exec = await container.exec({
-        Cmd: command,
-        AttachStdout: true,
-        AttachStderr: true,
-        WorkingDir: '/workspace'
-      });
-      
-      let output = '';
-      let error = '';
-      const logs: string[] = [];
-      
-      const stream = await exec.start({ hijack: true, stdin: false });
-      
-      // Setup timeout
-      const timeoutHandle = setTimeout(async () => {
-        try {
-          await container.kill({ signal: 'SIGKILL' });
-          resolve({
-            output,
-            error: error + '\nExecution timed out',
-            exitCode: 124,
-            logs: [...logs, 'Execution timed out']
-          });
-        } catch (e) {
-          // Container might already be stopped
-        }
-      }, timeout);
-      
-      // Collect output
-      stream.on('data', (chunk: Buffer) => {
-        const data = chunk.toString();
-        if (chunk[0] === 1) { // stdout
-          output += data.slice(8);
-        } else if (chunk[0] === 2) { // stderr
-          error += data.slice(8);
-        }
-        logs.push(data);
-      });
-      
-      stream.on('end', async () => {
-        clearTimeout(timeoutHandle);
-        
-        try {
-          const inspection = await exec.inspect();
-          resolve({
-            output: output.trim(),
-            error: error.trim(),
-            exitCode: inspection.ExitCode || 0,
-            logs
-          });
-        } catch (e) {
-          resolve({
-            output: output.trim(),
-            error: error.trim(),
-            exitCode: -1,
-            logs
-          });
-        }
-      });
-    });
-  }
-
-  private async execInContainer(container: Docker.Container, command: string[]): Promise<void> {
-    const exec = await container.exec({
-      Cmd: command,
-      AttachStdout: true,
-      AttachStderr: true,
-      WorkingDir: '/workspace'
-    });
-    
-    await exec.start({});
-  }
-
-  private async collectOutputFiles(container: Docker.Container): Promise<{ [filename: string]: string }> {
-    try {
-      const stream = await container.getArchive({ path: '/workspace' });
-      const tar = require('tar-stream');
-      const extract = tar.extract();
-      const files: { [filename: string]: string } = {};
-      
-      return new Promise((resolve) => {
-        extract.on('entry', (header: any, stream: any, next: any) => {
-          if (header.type === 'file' && !header.name.startsWith('main.')) {
-            let content = '';
-            stream.on('data', (chunk: Buffer) => {
-              content += chunk.toString();
-            });
-            stream.on('end', () => {
-              files[header.name] = content;
-              next();
-            });
-            stream.resume();
-          } else {
-            stream.on('end', () => next());
-            stream.resume();
-          }
-        });
-        
-        extract.on('finish', () => {
-          resolve(files);
-        });
-        
-        stream.pipe(extract);
-      });
-    } catch (error) {
-      return {};
-    }
-  }
-
-  private async cleanupContainer(executionId: string): Promise<void> {
-    const container = this.activeContainers.get(executionId);
-    if (container) {
-      try {
-        await container.kill();
-        await container.remove({ force: true });
-      } catch (error) {
-        console.error(`Failed to cleanup container ${executionId}:`, error);
-      }
-      this.activeContainers.delete(executionId);
-    }
-  }
-
-  private getImageForLanguage(language: string): string {
-    return this.languageConfigs[language]?.image || 'alpine:latest';
-  }
-
-  private getSecurityProfile(request: ExecutionRequest): SecurityProfile {
-    // Determine security profile based on user, project, or default
-    const profileName = request.userId ? 'development' : 'strict';
-    return this.securityProfiles.get(profileName) || this.securityProfiles.get('strict')!;
-  }
-
-  private getSecurityProfileName(request: ExecutionRequest): string {
-    return request.userId ? 'development' : 'strict';
-  }
-
-  private getResourceLimits(request: ExecutionRequest): any {
-    const profile = this.getSecurityProfile(request);
-    return {
-      memory: profile.memoryLimit,
-      cpu: profile.cpuLimit,
-      processes: profile.maxProcesses,
-      timeout: profile.timeoutSeconds
-    };
-  }
-
-  private parseMemoryLimit(limit: string): number {
-    const match = limit.match(/^(\d+)([kmg]?)$/i);
-    if (!match) return 128 * 1024 * 1024; // Default 128MB
-    
-    const value = parseInt(match[1]);
-    const unit = match[2].toLowerCase();
-    
-    switch (unit) {
-      case 'g': return value * 1024 * 1024 * 1024;
-      case 'm': return value * 1024 * 1024;
-      case 'k': return value * 1024;
-      default: return value;
-    }
-  }
-
-  private buildEnvironmentVariables(request: ExecutionRequest): string[] {
-    const env = [
-      'PATH=/usr/local/bin:/usr/bin:/bin',
-      'HOME=/workspace',
-      'USER=nobody'
-    ];
-    
-    if (request.environment) {
-      for (const [key, value] of Object.entries(request.environment)) {
-        env.push(`${key}=${value}`);
-      }
-    }
-    
-    return env;
-  }
-
-  // Queue management
-  async queueExecution(request: ExecutionRequest): Promise<void> {
-    this.executionQueue.push(request);
-    this.emit('executionQueued', request);
-  }
-
-  private async startQueueProcessor(): Promise<void> {
-    if (this.isProcessingQueue) return;
-    
-    this.isProcessingQueue = true;
-    
-    while (this.executionQueue.length > 0) {
-      const request = this.executionQueue.shift();
-      if (request) {
-        try {
-          await this.executeCode(request);
-        } catch (error) {
-          console.error(`Queue execution failed for ${request.id}:`, error);
-        }
-      }
-      
-      // Small delay to prevent overwhelming the system
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    this.isProcessingQueue = false;
-  }
-
-  // Management methods
-  async getActiveExecutions(): Promise<string[]> {
-    return Array.from(this.activeContainers.keys());
-  }
-
-  async killExecution(executionId: string): Promise<boolean> {
-    const container = this.activeContainers.get(executionId);
-    if (container) {
-      try {
-        await container.kill();
-        await this.cleanupContainer(executionId);
-        return true;
-      } catch (error) {
-        console.error(`Failed to kill execution ${executionId}:`, error);
-        return false;
-      }
-    }
-    return false;
-  }
-
-  async getExecutionStats(): Promise<any> {
-    const containerInfos = await Promise.all(
-      Array.from(this.activeContainers.values()).map(async (container) => {
-        try {
-          const stats = await container.stats({ stream: false });
-          return {
-            id: container.id,
-            memory: stats.memory_stats,
-            cpu: stats.cpu_stats
-          };
-        } catch (error) {
-          return null;
-        }
-      })
+    await this.dockerManager.createFileInContainer(
+      containerId,
+      `/workspace/${mainFileName}`,
+      jobConfig.code
     );
 
+    // Create additional input files
+    if (jobConfig.inputFiles) {
+      for (const file of jobConfig.inputFiles) {
+        await this.dockerManager.createFileInContainer(
+          containerId,
+          `/workspace/${file.path}`,
+          file.content
+        );
+      }
+    }
+
+    // Run setup commands
+    for (const command of runtime.setup) {
+      const result = await this.dockerManager.executeCommand(
+        containerId,
+        ['sh', '-c', command],
+        { 
+          workingDir: '/workspace',
+          timeout: 60000 // 1 minute timeout for setup
+        }
+      );
+
+      if (result.exitCode !== 0) {
+        throw new Error(`Setup failed: ${result.stderr}`);
+      }
+    }
+  }
+
+  private async runCode(
+    containerId: string,
+    jobConfig: JobConfig,
+    runtime: LanguageRuntime
+  ): Promise<ExecutionResult> {
+    const command = jobConfig.entrypoint || runtime.run;
+    const timeout = (jobConfig.timeout || 30) * 1000; // Convert to milliseconds
+
+    try {
+      const result = await this.dockerManager.executeCommand(
+        containerId,
+        command,
+        {
+          workingDir: '/workspace',
+          timeout,
+          environment: jobConfig.environment
+        }
+      );
+
+      return result;
+    } catch (error) {
+      throw new Error(`Code execution failed: ${error}`);
+    }
+  }
+
+  private async collectOutputs(
+    containerId: string,
+    jobConfig: JobConfig
+  ): Promise<Array<{ path: string; content: string }>> {
+    const outputFiles: Array<{ path: string; content: string }> = [];
+
+    if (!jobConfig.expectedOutputs) {
+      return outputFiles;
+    }
+
+    for (const outputPath of jobConfig.expectedOutputs) {
+      try {
+        const content = await this.dockerManager.readFileFromContainer(
+          containerId,
+          `/workspace/${outputPath}`
+        );
+        
+        outputFiles.push({
+          path: outputPath,
+          content
+        });
+      } catch (error) {
+        // File doesn't exist or can't be read - continue
+        console.warn(`Failed to read output file ${outputPath}: ${error}`);
+      }
+    }
+
+    return outputFiles;
+  }
+
+  private async cleanupJob(jobId: string): Promise<void> {
+    const job = this.activeJobs.get(jobId);
+    if (!job) return;
+
+    try {
+      // Clear timeout if exists
+      if (job.timeout) {
+        clearTimeout(job.timeout);
+      }
+
+      // Stop and remove container
+      await this.dockerManager.stopContainer(job.containerId);
+      await this.dockerManager.removeContainer(job.containerId, true);
+    } catch (error) {
+      console.error(`Failed to cleanup job ${jobId}:`, error);
+    } finally {
+      this.activeJobs.delete(jobId);
+    }
+  }
+
+  async cancelJob(jobId: string): Promise<void> {
+    const job = this.activeJobs.get(jobId);
+    if (!job) return;
+
+    await this.cleanupJob(jobId);
+    
+    const jobResult: JobResult = {
+      id: jobId,
+      status: 'error',
+      output: '',
+      error: 'Job was cancelled',
+      exitCode: 130, // SIGINT exit code
+      duration: 0
+    };
+
+    this.emit('jobComplete', jobResult);
+  }
+
+  async getJobStatus(jobId: string): Promise<string | null> {
+    const job = this.activeJobs.get(jobId);
+    if (!job) return null;
+
+    try {
+      const containerInfo = await this.dockerManager.getContainerInfo(job.containerId);
+      return containerInfo?.status || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async getActiveJobs(): Promise<string[]> {
+    return Array.from(this.activeJobs.keys());
+  }
+
+  async getJobLogs(jobId: string): Promise<string | null> {
+    const job = this.activeJobs.get(jobId);
+    if (!job) return null;
+
+    try {
+      return await this.dockerManager.getContainerLogs(job.containerId);
+    } catch {
+      return null;
+    }
+  }
+
+  getSupportedLanguages(): string[] {
+    return Object.keys(this.languageRuntimes);
+  }
+
+  getLanguageRuntime(language: string): LanguageRuntime | null {
+    return this.languageRuntimes[language] || null;
+  }
+
+  async addLanguageRuntime(language: string, runtime: LanguageRuntime): Promise<void> {
+    this.languageRuntimes[language] = runtime;
+    
+    // Pre-pull the image
+    try {
+      await this.dockerManager.pullImage(runtime.image);
+    } catch (error) {
+      console.warn(`Failed to pre-pull image for ${language}: ${error}`);
+    }
+  }
+
+  setMaxConcurrentJobs(max: number): void {
+    this.maxConcurrentJobs = Math.max(1, max);
+  }
+
+  getQueueStatus(): { queueLength: number; activeJobs: number; maxConcurrent: number } {
     return {
-      activeExecutions: this.activeContainers.size,
-      queuedExecutions: this.executionQueue.length,
-      containerStats: containerInfos.filter(Boolean)
+      queueLength: this.jobQueue.length,
+      activeJobs: this.currentJobs,
+      maxConcurrent: this.maxConcurrentJobs
     };
   }
 
   async cleanup(): Promise<void> {
-    // Kill all active containers
-    const cleanupPromises = Array.from(this.activeContainers.keys()).map(
-      executionId => this.cleanupContainer(executionId)
-    );
-    
-    await Promise.all(cleanupPromises);
-    this.executionQueue.length = 0;
+    // Cancel all active jobs
+    const activeJobIds = Array.from(this.activeJobs.keys());
+    await Promise.all(activeJobIds.map(jobId => this.cancelJob(jobId)));
+
+    // Clear job queue
+    this.jobQueue.length = 0;
+
+    // Cleanup docker manager
+    await this.dockerManager.cleanup();
+  }
+
+  async isHealthy(): Promise<boolean> {
+    try {
+      return await this.dockerManager.isDockerAvailable();
+    } catch {
+      return false;
+    }
+  }
+
+  async getStats(): Promise<any> {
+    return {
+      activeJobs: this.activeJobs.size,
+      queuedJobs: this.jobQueue.length,
+      maxConcurrentJobs: this.maxConcurrentJobs,
+      supportedLanguages: this.getSupportedLanguages().length,
+      isHealthy: await this.isHealthy()
+    };
   }
 }
+
+export default EnhancedDockerManager;

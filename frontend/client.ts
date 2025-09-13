@@ -108,6 +108,7 @@ export interface ClientOptions {
 /**
  * Import the endpoint handlers to derive the types for the client.
  */
+import { health as api_agents_health_health } from "~backend/agents/health";
 import { orchestrate as api_agents_orchestrate_orchestrate } from "~backend/agents/orchestrate";
 import {
     createSession as api_agents_orchestrator_createSession,
@@ -132,6 +133,7 @@ export namespace agents {
             this.getSession = this.getSession.bind(this)
             this.getStatus = this.getStatus.bind(this)
             this.getTasks = this.getTasks.bind(this)
+            this.health = this.health.bind(this)
             this.listAgents = this.listAgents.bind(this)
             this.listOrchestrations = this.listOrchestrations.bind(this)
             this.listSessions = this.listSessions.bind(this)
@@ -172,6 +174,12 @@ export namespace agents {
             // Now make the actual call to the API
             const resp = await this.baseClient.callTypedAPI(`/agents/sessions/${encodeURIComponent(params.sessionId)}/tasks`, {method: "GET", body: undefined})
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agents_orchestrator_getTasks>
+        }
+
+        public async health(): Promise<ResponseType<typeof api_agents_health_health>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/health`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agents_health_health>
         }
 
         /**
@@ -221,6 +229,7 @@ import {
     generate as api_ai_generate_generate,
     generateCode as api_ai_generate_generateCode
 } from "~backend/ai/generate";
+import { health as api_ai_health_health } from "~backend/ai/health";
 
 export namespace ai {
 
@@ -233,6 +242,7 @@ export namespace ai {
             this.explainCode = this.explainCode.bind(this)
             this.generate = this.generate.bind(this)
             this.generateCode = this.generateCode.bind(this)
+            this.health = this.health.bind(this)
         }
 
         /**
@@ -270,12 +280,19 @@ export namespace ai {
             const resp = await this.baseClient.callTypedAPI(`/ai/generate-code`, {method: "POST", body: JSON.stringify(params)})
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_ai_generate_generateCode>
         }
+
+        public async health(): Promise<ResponseType<typeof api_ai_health_health>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/health`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_ai_health_health>
+        }
     }
 }
 
 /**
  * Import the endpoint handlers to derive the types for the client.
  */
+import { health as api_auth_health_health } from "~backend/auth/health";
 import { getUserInfo as api_auth_user_getUserInfo } from "~backend/auth/user";
 
 export namespace auth {
@@ -286,6 +303,7 @@ export namespace auth {
         constructor(baseClient: BaseClient) {
             this.baseClient = baseClient
             this.getUserInfo = this.getUserInfo.bind(this)
+            this.health = this.health.bind(this)
         }
 
         /**
@@ -295,6 +313,12 @@ export namespace auth {
             // Now make the actual call to the API
             const resp = await this.baseClient.callTypedAPI(`/user/me`, {method: "GET", body: undefined})
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_auth_user_getUserInfo>
+        }
+
+        public async health(): Promise<ResponseType<typeof api_auth_health_health>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/health`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_auth_health_health>
         }
     }
 }
@@ -389,10 +413,20 @@ export namespace deployment {
  */
 import {
     createEnvironment as api_execution_environments_createEnvironment,
-    executeCode as api_execution_environments_executeCode,
+    executeCodeInEnvironment as api_execution_environments_executeCodeInEnvironment,
     getEnvironment as api_execution_environments_getEnvironment,
     listEnvironments as api_execution_environments_listEnvironments
 } from "~backend/execution/environments";
+import {
+    cancelExecution as api_execution_execute_cancelExecution,
+    execute as api_execution_execute_execute,
+    getExecution as api_execution_execute_getExecution,
+    getExecutionHealth as api_execution_execute_getExecutionHealth,
+    getExecutionLogs as api_execution_execute_getExecutionLogs,
+    getExecutionMetrics as api_execution_execute_getExecutionMetrics,
+    getExecutionStatus as api_execution_execute_getExecutionStatus,
+    getSupportedLanguages as api_execution_execute_getSupportedLanguages
+} from "~backend/execution/execute";
 
 export namespace execution {
 
@@ -401,10 +435,24 @@ export namespace execution {
 
         constructor(baseClient: BaseClient) {
             this.baseClient = baseClient
+            this.cancelExecution = this.cancelExecution.bind(this)
             this.createEnvironment = this.createEnvironment.bind(this)
-            this.executeCode = this.executeCode.bind(this)
+            this.execute = this.execute.bind(this)
+            this.executeCodeInEnvironment = this.executeCodeInEnvironment.bind(this)
             this.getEnvironment = this.getEnvironment.bind(this)
+            this.getExecution = this.getExecution.bind(this)
+            this.getExecutionHealth = this.getExecutionHealth.bind(this)
+            this.getExecutionLogs = this.getExecutionLogs.bind(this)
+            this.getExecutionMetrics = this.getExecutionMetrics.bind(this)
+            this.getExecutionStatus = this.getExecutionStatus.bind(this)
+            this.getSupportedLanguages = this.getSupportedLanguages.bind(this)
             this.listEnvironments = this.listEnvironments.bind(this)
+        }
+
+        public async cancelExecution(params: { executionId: string }): Promise<ResponseType<typeof api_execution_execute_cancelExecution>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/${encodeURIComponent(params.executionId)}`, {method: "DELETE", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_cancelExecution>
         }
 
         /**
@@ -416,13 +464,19 @@ export namespace execution {
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_environments_createEnvironment>
         }
 
+        public async execute(params: RequestType<typeof api_execution_execute_execute>): Promise<ResponseType<typeof api_execution_execute_execute>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/execute`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_execute>
+        }
+
         /**
          * Executes code in a sandboxed environment.
          */
-        public async executeCode(params: RequestType<typeof api_execution_environments_executeCode>): Promise<ResponseType<typeof api_execution_environments_executeCode>> {
+        public async executeCodeInEnvironment(params: RequestType<typeof api_execution_environments_executeCodeInEnvironment>): Promise<ResponseType<typeof api_execution_environments_executeCodeInEnvironment>> {
             // Now make the actual call to the API
-            const resp = await this.baseClient.callTypedAPI(`/execution/execute`, {method: "POST", body: JSON.stringify(params)})
-            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_environments_executeCode>
+            const resp = await this.baseClient.callTypedAPI(`/execution/environments/execute`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_environments_executeCodeInEnvironment>
         }
 
         /**
@@ -432,6 +486,42 @@ export namespace execution {
             // Now make the actual call to the API
             const resp = await this.baseClient.callTypedAPI(`/execution/environments/${encodeURIComponent(params.id)}`, {method: "GET", body: undefined})
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_environments_getEnvironment>
+        }
+
+        public async getExecution(params: { executionId: string }): Promise<ResponseType<typeof api_execution_execute_getExecution>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/${encodeURIComponent(params.executionId)}`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_getExecution>
+        }
+
+        public async getExecutionHealth(): Promise<ResponseType<typeof api_execution_execute_getExecutionHealth>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/health`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_getExecutionHealth>
+        }
+
+        public async getExecutionLogs(params: { executionId: string }): Promise<ResponseType<typeof api_execution_execute_getExecutionLogs>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/${encodeURIComponent(params.executionId)}/logs`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_getExecutionLogs>
+        }
+
+        public async getExecutionMetrics(): Promise<ResponseType<typeof api_execution_execute_getExecutionMetrics>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/metrics`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_getExecutionMetrics>
+        }
+
+        public async getExecutionStatus(params: { executionId: string }): Promise<ResponseType<typeof api_execution_execute_getExecutionStatus>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/${encodeURIComponent(params.executionId)}/status`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_getExecutionStatus>
+        }
+
+        public async getSupportedLanguages(): Promise<ResponseType<typeof api_execution_execute_getSupportedLanguages>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/execution/languages`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_execution_execute_getSupportedLanguages>
         }
 
         /**
@@ -451,6 +541,7 @@ export namespace execution {
 import { createDirectory as api_files_create_directory_createDirectory } from "~backend/files/create_directory";
 import { deleteFile as api_files_delete_deleteFile } from "~backend/files/delete";
 import { get as api_files_get_get } from "~backend/files/get";
+import { health as api_files_health_health } from "~backend/files/health";
 import { list as api_files_list_list } from "~backend/files/list";
 import { save as api_files_save_save } from "~backend/files/save";
 import { listTemplates as api_files_templates_listTemplates } from "~backend/files/templates";
@@ -465,6 +556,7 @@ export namespace files {
             this.createDirectory = this.createDirectory.bind(this)
             this.deleteFile = this.deleteFile.bind(this)
             this.get = this.get.bind(this)
+            this.health = this.health.bind(this)
             this.list = this.list.bind(this)
             this.listTemplates = this.listTemplates.bind(this)
             this.save = this.save.bind(this)
@@ -495,6 +587,12 @@ export namespace files {
             // Now make the actual call to the API
             const resp = await this.baseClient.callTypedAPI(`/files/file/${encodeURIComponent(params.id)}`, {method: "GET", body: undefined})
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_files_get_get>
+        }
+
+        public async health(): Promise<ResponseType<typeof api_files_health_health>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/health`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_files_health_health>
         }
 
         /**
@@ -532,6 +630,7 @@ export namespace files {
 import { create as api_projects_create_create } from "~backend/projects/create";
 import { deleteProject as api_projects_delete_deleteProject } from "~backend/projects/delete";
 import { get as api_projects_get_get } from "~backend/projects/get";
+import { health as api_projects_health_health } from "~backend/projects/health";
 import { list as api_projects_list_list } from "~backend/projects/list";
 import { update as api_projects_update_update } from "~backend/projects/update";
 
@@ -545,6 +644,7 @@ export namespace projects {
             this.create = this.create.bind(this)
             this.deleteProject = this.deleteProject.bind(this)
             this.get = this.get.bind(this)
+            this.health = this.health.bind(this)
             this.list = this.list.bind(this)
             this.update = this.update.bind(this)
         }
@@ -574,6 +674,12 @@ export namespace projects {
             // Now make the actual call to the API
             const resp = await this.baseClient.callTypedAPI(`/projects/${encodeURIComponent(params.id)}`, {method: "GET", body: undefined})
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_projects_get_get>
+        }
+
+        public async health(): Promise<ResponseType<typeof api_projects_health_health>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/health`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_projects_health_health>
         }
 
         /**

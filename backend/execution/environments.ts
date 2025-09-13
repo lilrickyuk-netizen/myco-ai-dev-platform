@@ -141,8 +141,8 @@ export interface ExecuteCodeRequest {
 }
 
 // Executes code in a sandboxed environment.
-export const executeCode = api<ExecuteCodeRequest, ExecutionResult>(
-  { auth: true, expose: true, method: "POST", path: "/execution/execute" },
+export const executeCodeInEnvironment = api<ExecuteCodeRequest, ExecutionResult>(
+  { auth: true, expose: true, method: "POST", path: "/execution/environments/execute" },
   async (req) => {
     const auth = getAuthData()!;
 

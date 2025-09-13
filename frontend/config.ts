@@ -1,6 +1,6 @@
 // Clerk publishable key for authentication
 // Get this from your Clerk dashboard at https://clerk.com
-export const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_your-clerk-key-here";
+export const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_c3RpcnJpbmctcGVyY2gtMTUuY2xlcmsuYWNjb3VudHMuZGV2JA";
 
 // API configuration
 export const apiConfig = {

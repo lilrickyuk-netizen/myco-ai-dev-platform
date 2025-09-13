@@ -1,90 +1,135 @@
 """
-Health check routes
+Health check routes for the AI Engine
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 import time
-import psutil
 import asyncio
 
-from ...core.config import settings
 from ...services.llm_manager import llm_manager
+from ...services.agent_manager import agent_manager
+from ...services.vector_store import vector_store_manager
+from ...services.cache_manager import cache_manager
+from ...core.config import settings
 
 router = APIRouter()
 
-@router.get("/")
-async def health_check() -> Dict[str, Any]:
-    """Basic health check"""
+@router.get("/ping")
+async def ping():
+    """Simple ping endpoint"""
     return {
-        "status": "healthy",
+        "message": "pong", 
         "timestamp": time.time(),
-        "service": "AI Engine",
-        "version": "1.0.0"
+        "service": "ai-engine"
     }
 
-@router.get("/detailed")
-async def detailed_health_check() -> Dict[str, Any]:
-    """Detailed health check with system metrics"""
+@router.get("/health")
+async def health_check():
+    """Comprehensive health check"""
     
-    # System metrics
-    cpu_percent = psutil.cpu_percent(interval=1)
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage('/')
-    
-    # LLM provider health
-    llm_health = await llm_manager.health_check()
-    
-    return {
+    health_status = {
         "status": "healthy",
         "timestamp": time.time(),
-        "service": "AI Engine",
+        "service": "ai-engine",
         "version": "1.0.0",
-        "system": {
-            "cpu_percent": cpu_percent,
-            "memory": {
-                "total": memory.total,
-                "available": memory.available,
-                "percent": memory.percent
-            },
-            "disk": {
-                "total": disk.total,
-                "free": disk.free,
-                "percent": (disk.used / disk.total) * 100
-            }
-        },
-        "llm_providers": llm_health,
-        "configuration": {
-            "debug": settings.DEBUG,
-            "max_tokens": settings.MAX_TOKENS,
-            "default_model": settings.DEFAULT_MODEL
-        }
+        "components": {}
     }
+    
+    # Check LLM Manager
+    try:
+        llm_health = await llm_manager.health_check()
+        health_status["components"]["llm_manager"] = {
+            "status": "healthy",
+            "providers": llm_health
+        }
+    except Exception as e:
+        health_status["components"]["llm_manager"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_status["status"] = "unhealthy"
+    
+    # Check Agent Manager
+    try:
+        agent_health = await agent_manager.health_check()
+        health_status["components"]["agent_manager"] = {
+            "status": "healthy",
+            "agents": agent_health
+        }
+    except Exception as e:
+        health_status["components"]["agent_manager"] = {
+            "status": "unhealthy", 
+            "error": str(e)
+        }
+        health_status["status"] = "unhealthy"
+    
+    # Check Vector Store
+    try:
+        vector_health = await vector_store_manager.health_check()
+        health_status["components"]["vector_store"] = {
+            "status": "healthy",
+            "details": vector_health
+        }
+    except Exception as e:
+        health_status["components"]["vector_store"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_status["status"] = "unhealthy"
+    
+    # Check Cache Manager
+    try:
+        cache_health = await cache_manager.health_check()
+        health_status["components"]["cache_manager"] = {
+            "status": "healthy",
+            "details": cache_health
+        }
+    except Exception as e:
+        health_status["components"]["cache_manager"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_status["status"] = "unhealthy"
+    
+    return health_status
 
 @router.get("/ready")
-async def readiness_check() -> Dict[str, Any]:
-    """Kubernetes readiness probe"""
+async def readiness_check():
+    """Readiness check for Kubernetes"""
+    
+    # Check if all critical components are ready
     try:
-        # Check if LLM manager is working
-        providers = llm_manager.get_available_providers()
-        
-        if not providers:
-            return {"status": "not_ready", "reason": "No LLM providers available"}
+        # Quick LLM test
+        await asyncio.wait_for(
+            llm_manager.generate("test", max_tokens=1),
+            timeout=10.0
+        )
         
         return {
             "status": "ready",
-            "providers": providers
+            "timestamp": time.time()
         }
     except Exception as e:
-        return {
-            "status": "not_ready",
-            "reason": str(e)
-        }
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service not ready: {str(e)}"
+        )
 
-@router.get("/live")
-async def liveness_check() -> Dict[str, Any]:
-    """Kubernetes liveness probe"""
+@router.get("/metrics")
+async def get_metrics():
+    """Get service metrics"""
+    
     return {
-        "status": "alive",
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "uptime": time.time() - getattr(get_metrics, '_start_time', time.time()),
+        "requests_total": getattr(get_metrics, '_requests', 0),
+        "errors_total": getattr(get_metrics, '_errors', 0),
+        "llm_providers": len(llm_manager.get_available_providers()),
+        "active_agents": len(await agent_manager.get_active_sessions()),
     }
+
+# Initialize metrics tracking
+get_metrics._start_time = time.time()
+get_metrics._requests = 0
+get_metrics._errors = 0

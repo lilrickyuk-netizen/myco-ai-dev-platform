@@ -1,335 +1,437 @@
 """
-Cache management service
+Cache Manager - Handles caching for AI responses and embeddings
 """
 
 import asyncio
 import json
+import hashlib
 import logging
 import time
-import hashlib
-from typing import Dict, Any, Optional, Union
-from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional, Union
+from dataclasses import dataclass, asdict
+from abc import ABC, abstractmethod
+
+# Cache backend imports
+try:
+    import redis.asyncio as redis
+except ImportError:
+    redis = None
+
+try:
+    import pymongo
+    from motor.motor_asyncio import AsyncIOMotorClient
+except ImportError:
+    pymongo = None
+    AsyncIOMotorClient = None
 
 from ..core.config import settings
-from ..core.exceptions import AIEngineError
 
-class CacheManager:
-    """Manages caching for AI responses and data"""
+logger = logging.getLogger(__name__)
+
+@dataclass
+class CacheEntry:
+    key: str
+    value: Any
+    expires_at: Optional[float] = None
+    created_at: float = None
+    access_count: int = 0
     
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.cache: Dict[str, Dict[str, Any]] = {}
-        self.access_times: Dict[str, float] = {}
-        self.ttl_default = settings.CACHE_TTL
-        self.max_size = settings.CACHE_MAX_SIZE
-        self.cleanup_interval = 300  # 5 minutes
-        self.last_cleanup = time.time()
-        
-    async def initialize(self):
-        """Initialize the cache manager"""
-        self.logger.info("Initializing Cache Manager...")
-        
-        # Start periodic cleanup
-        asyncio.create_task(self._periodic_cleanup())
-        
-        self.logger.info("Cache Manager initialized successfully")
+    def __post_init__(self):
+        if self.created_at is None:
+            self.created_at = time.time()
+
+class CacheBackend(ABC):
+    """Abstract base class for cache backends"""
     
-    async def cleanup(self):
-        """Cleanup the cache manager"""
-        self.logger.info("Shutting down Cache Manager...")
-        
-        # Clear all cache
-        self.cache.clear()
-        self.access_times.clear()
-        
-        self.logger.info("Cache Manager shutdown complete")
+    @abstractmethod
+    async def get(self, key: str) -> Optional[Any]:
+        """Get value by key"""
+        pass
+    
+    @abstractmethod
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Set value with optional TTL"""
+        pass
+    
+    @abstractmethod
+    async def delete(self, key: str) -> None:
+        """Delete key"""
+        pass
+    
+    @abstractmethod
+    async def exists(self, key: str) -> bool:
+        """Check if key exists"""
+        pass
+    
+    @abstractmethod
+    async def clear(self) -> None:
+        """Clear all cache entries"""
+        pass
+    
+    @abstractmethod
+    async def health_check(self) -> Dict[str, Any]:
+        """Check cache backend health"""
+        pass
+
+class MemoryCache(CacheBackend):
+    """In-memory cache implementation"""
+    
+    def __init__(self, max_size: int = 1000):
+        self.cache: Dict[str, CacheEntry] = {}
+        self.max_size = max_size
+        self._lock = asyncio.Lock()
     
     async def get(self, key: str) -> Optional[Any]:
-        """Get value from cache"""
-        
-        cache_key = self._hash_key(key)
-        
-        if cache_key not in self.cache:
-            return None
-        
-        entry = self.cache[cache_key]
-        
-        # Check if expired
-        if self._is_expired(entry):
-            await self.delete(key)
-            return None
-        
-        # Update access time
-        self.access_times[cache_key] = time.time()
-        
-        # Return value
-        return entry["value"]
+        """Get value by key"""
+        async with self._lock:
+            entry = self.cache.get(key)
+            if not entry:
+                return None
+            
+            # Check expiration
+            if entry.expires_at and time.time() > entry.expires_at:
+                del self.cache[key]
+                return None
+            
+            # Update access count
+            entry.access_count += 1
+            return entry.value
     
-    async def set(
-        self,
-        key: str,
-        value: Any,
-        ttl: Optional[int] = None,
-        tags: Optional[list] = None
-    ):
-        """Set value in cache"""
-        
-        cache_key = self._hash_key(key)
-        
-        # Use default TTL if not specified
-        if ttl is None:
-            ttl = self.ttl_default
-        
-        # Calculate expiration time
-        expires_at = time.time() + ttl if ttl > 0 else None
-        
-        # Create cache entry
-        entry = {
-            "value": value,
-            "created_at": time.time(),
-            "expires_at": expires_at,
-            "ttl": ttl,
-            "tags": tags or [],
-            "hit_count": 0
-        }
-        
-        # Store in cache
-        self.cache[cache_key] = entry
-        self.access_times[cache_key] = time.time()
-        
-        # Enforce size limit
-        await self._enforce_size_limit()
-        
-        self.logger.debug(f"Cached value for key: {key[:50]}...")
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Set value with optional TTL"""
+        async with self._lock:
+            # Evict entries if cache is full
+            if len(self.cache) >= self.max_size:
+                await self._evict_lru()
+            
+            expires_at = None
+            if ttl:
+                expires_at = time.time() + ttl
+            
+            self.cache[key] = CacheEntry(
+                key=key,
+                value=value,
+                expires_at=expires_at
+            )
     
-    async def delete(self, key: str) -> bool:
-        """Delete value from cache"""
-        
-        cache_key = self._hash_key(key)
-        
-        if cache_key in self.cache:
-            del self.cache[cache_key]
-            self.access_times.pop(cache_key, None)
-            self.logger.debug(f"Deleted cache key: {key[:50]}...")
-            return True
-        
-        return False
-    
-    async def delete_by_tags(self, tags: list) -> int:
-        """Delete all cache entries with specified tags"""
-        
-        deleted_count = 0
-        keys_to_delete = []
-        
-        for cache_key, entry in self.cache.items():
-            entry_tags = entry.get("tags", [])
-            if any(tag in entry_tags for tag in tags):
-                keys_to_delete.append(cache_key)
-        
-        for cache_key in keys_to_delete:
-            del self.cache[cache_key]
-            self.access_times.pop(cache_key, None)
-            deleted_count += 1
-        
-        self.logger.info(f"Deleted {deleted_count} cache entries with tags: {tags}")
-        return deleted_count
-    
-    async def clear(self):
-        """Clear all cache"""
-        
-        count = len(self.cache)
-        self.cache.clear()
-        self.access_times.clear()
-        
-        self.logger.info(f"Cleared {count} cache entries")
+    async def delete(self, key: str) -> None:
+        """Delete key"""
+        async with self._lock:
+            self.cache.pop(key, None)
     
     async def exists(self, key: str) -> bool:
-        """Check if key exists in cache"""
-        
-        cache_key = self._hash_key(key)
-        
-        if cache_key not in self.cache:
-            return False
-        
-        entry = self.cache[cache_key]
-        
-        # Check if expired
-        if self._is_expired(entry):
-            await self.delete(key)
-            return False
-        
-        return True
+        """Check if key exists"""
+        return key in self.cache
     
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
-        
-        # Count expired entries
-        expired_count = 0
-        total_size = 0
-        
-        for entry in self.cache.values():
-            if self._is_expired(entry):
-                expired_count += 1
-            
-            # Estimate size (rough calculation)
-            total_size += len(str(entry["value"]))
-        
-        return {
-            "total_entries": len(self.cache),
-            "expired_entries": expired_count,
-            "active_entries": len(self.cache) - expired_count,
-            "estimated_size_bytes": total_size,
-            "max_size": self.max_size,
-            "ttl_default": self.ttl_default,
-            "hit_ratio": self._calculate_hit_ratio(),
-            "last_cleanup": self.last_cleanup
-        }
+    async def clear(self) -> None:
+        """Clear all cache entries"""
+        async with self._lock:
+            self.cache.clear()
     
-    def _hash_key(self, key: str) -> str:
-        """Create hash of cache key"""
-        return hashlib.sha256(key.encode()).hexdigest()
-    
-    def _is_expired(self, entry: Dict[str, Any]) -> bool:
-        """Check if cache entry is expired"""
-        
-        expires_at = entry.get("expires_at")
-        
-        if expires_at is None:
-            return False  # No expiration
-        
-        return time.time() > expires_at
-    
-    async def _enforce_size_limit(self):
-        """Enforce cache size limit using LRU eviction"""
-        
-        if len(self.cache) <= self.max_size:
+    async def _evict_lru(self) -> None:
+        """Evict least recently used entry"""
+        if not self.cache:
             return
         
-        # Sort by access time (oldest first)
-        sorted_keys = sorted(
-            self.access_times.items(),
-            key=lambda x: x[1]
+        # Find entry with lowest access count and oldest creation time
+        lru_key = min(
+            self.cache.keys(),
+            key=lambda k: (self.cache[k].access_count, self.cache[k].created_at)
         )
-        
-        # Remove oldest entries
-        entries_to_remove = len(self.cache) - self.max_size
-        
-        for cache_key, _ in sorted_keys[:entries_to_remove]:
-            self.cache.pop(cache_key, None)
-            self.access_times.pop(cache_key, None)
-        
-        self.logger.debug(f"Evicted {entries_to_remove} cache entries due to size limit")
+        del self.cache[lru_key]
     
-    async def _periodic_cleanup(self):
-        """Periodically clean up expired entries"""
-        
-        while True:
-            try:
-                await asyncio.sleep(self.cleanup_interval)
-                
-                # Remove expired entries
-                expired_keys = []
-                
-                for cache_key, entry in self.cache.items():
-                    if self._is_expired(entry):
-                        expired_keys.append(cache_key)
-                
-                for cache_key in expired_keys:
-                    self.cache.pop(cache_key, None)
-                    self.access_times.pop(cache_key, None)
-                
-                if expired_keys:
-                    self.logger.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
-                
-                self.last_cleanup = time.time()
-                
-            except Exception as e:
-                self.logger.error(f"Error during cache cleanup: {e}")
-    
-    def _calculate_hit_ratio(self) -> float:
-        """Calculate cache hit ratio"""
-        
-        total_hits = sum(entry.get("hit_count", 0) for entry in self.cache.values())
-        total_entries = len(self.cache)
-        
-        if total_entries == 0:
-            return 0.0
-        
-        return total_hits / total_entries
+    async def health_check(self) -> Dict[str, Any]:
+        """Check memory cache health"""
+        return {
+            "status": "healthy",
+            "backend": "memory",
+            "size": len(self.cache),
+            "max_size": self.max_size
+        }
 
-class LLMResponseCache:
-    """Specialized cache for LLM responses"""
+class RedisCache(CacheBackend):
+    """Redis cache implementation"""
     
-    def __init__(self, cache_manager: CacheManager):
-        self.cache_manager = cache_manager
-        self.cache_prefix = "llm_response:"
+    def __init__(self, redis_url: str):
+        if redis is None:
+            raise ImportError("redis not installed")
+        
+        self.redis_url = redis_url
+        self.redis_client: Optional[redis.Redis] = None
     
-    async def get_response(
+    async def _get_client(self) -> redis.Redis:
+        """Get Redis client, creating if necessary"""
+        if not self.redis_client:
+            self.redis_client = redis.from_url(self.redis_url)
+        return self.redis_client
+    
+    async def get(self, key: str) -> Optional[Any]:
+        """Get value by key"""
+        try:
+            client = await self._get_client()
+            value = await client.get(key)
+            if value:
+                return json.loads(value)
+            return None
+        except Exception as e:
+            logger.error(f"Redis get error: {e}")
+            return None
+    
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Set value with optional TTL"""
+        try:
+            client = await self._get_client()
+            serialized = json.dumps(value, default=str)
+            
+            if ttl:
+                await client.setex(key, ttl, serialized)
+            else:
+                await client.set(key, serialized)
+        except Exception as e:
+            logger.error(f"Redis set error: {e}")
+    
+    async def delete(self, key: str) -> None:
+        """Delete key"""
+        try:
+            client = await self._get_client()
+            await client.delete(key)
+        except Exception as e:
+            logger.error(f"Redis delete error: {e}")
+    
+    async def exists(self, key: str) -> bool:
+        """Check if key exists"""
+        try:
+            client = await self._get_client()
+            return bool(await client.exists(key))
+        except Exception as e:
+            logger.error(f"Redis exists error: {e}")
+            return False
+    
+    async def clear(self) -> None:
+        """Clear all cache entries"""
+        try:
+            client = await self._get_client()
+            await client.flushdb()
+        except Exception as e:
+            logger.error(f"Redis clear error: {e}")
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check Redis health"""
+        try:
+            client = await self._get_client()
+            await client.ping()
+            info = await client.info()
+            
+            return {
+                "status": "healthy",
+                "backend": "redis",
+                "memory_usage": info.get("used_memory_human", "unknown"),
+                "connected_clients": info.get("connected_clients", 0)
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "backend": "redis",
+                "error": str(e)
+            }
+
+class CacheManager:
+    """Manages caching for AI responses and embeddings"""
+    
+    def __init__(self):
+        self.backend: Optional[CacheBackend] = None
+        self.default_ttl = settings.CACHE_TTL
+        self._initialize_backend()
+    
+    def _initialize_backend(self):
+        """Initialize cache backend"""
+        
+        # Try Redis first
+        if redis and settings.REDIS_URL:
+            try:
+                self.backend = RedisCache(settings.REDIS_URL)
+                logger.info("Initialized Redis cache backend")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to initialize Redis cache: {e}")
+        
+        # Fallback to memory cache
+        self.backend = MemoryCache(max_size=settings.CACHE_MAX_SIZE)
+        logger.info("Initialized memory cache backend")
+    
+    async def initialize(self):
+        """Initialize the cache manager"""
+        logger.info("Cache manager initialized")
+    
+    async def cleanup(self):
+        """Cleanup cache resources"""
+        if hasattr(self.backend, 'redis_client') and self.backend.redis_client:
+            await self.backend.redis_client.close()
+        logger.info("Cache manager cleaned up")
+    
+    def _generate_key(self, namespace: str, data: Union[str, Dict[str, Any]]) -> str:
+        """Generate cache key from data"""
+        if isinstance(data, str):
+            content = data
+        else:
+            content = json.dumps(data, sort_keys=True, default=str)
+        
+        hash_obj = hashlib.sha256(content.encode())
+        return f"{namespace}:{hash_obj.hexdigest()[:16]}"
+    
+    async def get_llm_response(
         self,
         prompt: str,
-        model: str,
-        provider: str,
-        **kwargs
+        context: Optional[str] = None,
+        provider: str = "openai",
+        model: str = "gpt-4"
     ) -> Optional[Dict[str, Any]]:
         """Get cached LLM response"""
         
-        cache_key = self._build_cache_key(prompt, model, provider, **kwargs)
-        return await self.cache_manager.get(cache_key)
+        cache_data = {
+            "prompt": prompt,
+            "context": context,
+            "provider": provider,
+            "model": model
+        }
+        
+        key = self._generate_key("llm_response", cache_data)
+        return await self.backend.get(key)
     
-    async def cache_response(
+    async def set_llm_response(
         self,
         prompt: str,
-        model: str,
-        provider: str,
         response: Dict[str, Any],
-        ttl: int = 3600,
-        **kwargs
-    ):
+        context: Optional[str] = None,
+        provider: str = "openai",
+        model: str = "gpt-4",
+        ttl: Optional[int] = None
+    ) -> None:
         """Cache LLM response"""
         
-        cache_key = self._build_cache_key(prompt, model, provider, **kwargs)
-        
-        # Add metadata to response
-        cached_response = {
-            **response,
-            "cached_at": time.time(),
-            "cache_key": cache_key
-        }
-        
-        await self.cache_manager.set(
-            cache_key,
-            cached_response,
-            ttl=ttl,
-            tags=["llm_response", provider, model]
-        )
-    
-    def _build_cache_key(
-        self,
-        prompt: str,
-        model: str,
-        provider: str,
-        **kwargs
-    ) -> str:
-        """Build cache key for LLM response"""
-        
-        # Include relevant parameters in cache key
-        key_data = {
+        cache_data = {
             "prompt": prompt,
-            "model": model,
+            "context": context,
             "provider": provider,
-            "temperature": kwargs.get("temperature", 0.7),
-            "max_tokens": kwargs.get("max_tokens", 4096),
-            "top_p": kwargs.get("top_p", 1.0)
+            "model": model
         }
         
-        # Create deterministic key
-        key_string = json.dumps(key_data, sort_keys=True)
-        cache_key = self.cache_prefix + hashlib.sha256(key_string.encode()).hexdigest()
+        key = self._generate_key("llm_response", cache_data)
+        await self.backend.set(key, response, ttl or self.default_ttl)
+    
+    async def get_embedding(self, text: str, model: str = "text-embedding-ada-002") -> Optional[List[float]]:
+        """Get cached embedding"""
         
-        return cache_key
+        cache_data = {
+            "text": text,
+            "model": model
+        }
+        
+        key = self._generate_key("embedding", cache_data)
+        return await self.backend.get(key)
+    
+    async def set_embedding(
+        self,
+        text: str,
+        embedding: List[float],
+        model: str = "text-embedding-ada-002",
+        ttl: Optional[int] = None
+    ) -> None:
+        """Cache embedding"""
+        
+        cache_data = {
+            "text": text,
+            "model": model
+        }
+        
+        key = self._generate_key("embedding", cache_data)
+        await self.backend.set(key, embedding, ttl or self.default_ttl)
+    
+    async def get_code_generation(
+        self,
+        description: str,
+        language: str,
+        framework: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Get cached code generation result"""
+        
+        cache_data = {
+            "description": description,
+            "language": language,
+            "framework": framework
+        }
+        
+        key = self._generate_key("code_generation", cache_data)
+        return await self.backend.get(key)
+    
+    async def set_code_generation(
+        self,
+        description: str,
+        result: Dict[str, Any],
+        language: str,
+        framework: Optional[str] = None,
+        ttl: Optional[int] = None
+    ) -> None:
+        """Cache code generation result"""
+        
+        cache_data = {
+            "description": description,
+            "language": language,
+            "framework": framework
+        }
+        
+        key = self._generate_key("code_generation", cache_data)
+        await self.backend.set(key, result, ttl or self.default_ttl)
+    
+    async def get_agent_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached agent session data"""
+        key = f"agent_session:{session_id}"
+        return await self.backend.get(key)
+    
+    async def set_agent_session(
+        self,
+        session_id: str,
+        session_data: Dict[str, Any],
+        ttl: Optional[int] = None
+    ) -> None:
+        """Cache agent session data"""
+        key = f"agent_session:{session_id}"
+        await self.backend.set(key, session_data, ttl or self.default_ttl)
+    
+    async def invalidate_pattern(self, pattern: str) -> None:
+        """Invalidate cache entries matching pattern"""
+        # This is a simplified implementation
+        # In production, you might want to use Redis SCAN for pattern matching
+        logger.info(f"Invalidating cache pattern: {pattern}")
+    
+    async def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        
+        if isinstance(self.backend, MemoryCache):
+            return {
+                "backend": "memory",
+                "size": len(self.backend.cache),
+                "max_size": self.backend.max_size
+            }
+        elif isinstance(self.backend, RedisCache):
+            return await self.backend.health_check()
+        else:
+            return {"backend": "unknown"}
+    
+    async def clear_cache(self) -> None:
+        """Clear all cache entries"""
+        await self.backend.clear()
+        logger.info("Cache cleared")
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check cache health"""
+        if self.backend:
+            return await self.backend.health_check()
+        else:
+            return {
+                "status": "unhealthy",
+                "error": "No cache backend initialized"
+            }
 
-# Global cache manager instance
+# Global instance
 cache_manager = CacheManager()
-
-# Global LLM response cache
-llm_response_cache = LLMResponseCache(cache_manager)

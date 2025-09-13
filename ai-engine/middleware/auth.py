@@ -1,269 +1,200 @@
 """
-Authentication middleware and utilities
+Authentication middleware for AI Engine
 """
 
-import jwt
-import bcrypt
-import httpx
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from ..core.config import settings
-from ..core.exceptions import AuthenticationError
+import jwt
+import time
+from typing import Optional, Dict, Any
 
-# Authentication middleware
+from ..core.config import settings
+
 security = HTTPBearer()
 
 class AuthMiddleware:
-    """Authentication middleware for FastAPI"""
+    """Authentication middleware"""
     
     def __init__(self):
-        self.secret_key = settings.JWT_SECRET_KEY
-        self.algorithm = settings.JWT_ALGORITHM
-        self.expiration_hours = settings.JWT_EXPIRATION_HOURS
-    
-    def create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-        """Create a JWT access token"""
-        to_encode = data.copy()
-        
-        if expires_delta:
-            expire = datetime.utcnow() + expires_delta
-        else:
-            expire = datetime.utcnow() + timedelta(hours=self.expiration_hours)
-        
-        to_encode.update({
-            "exp": expire,
-            "iat": datetime.utcnow(),
-            "iss": "myco-platform"
-        })
-        
-        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
-        
-        return encoded_jwt
+        self.jwt_secret = settings.JWT_SECRET_KEY
+        self.jwt_algorithm = settings.JWT_ALGORITHM
     
     def verify_token(self, token: str) -> Dict[str, Any]:
-        """Verify and decode a JWT token"""
+        """Verify JWT token and return payload"""
         try:
             payload = jwt.decode(
                 token, 
-                self.secret_key, 
-                algorithms=[self.algorithm],
-                issuer="myco-platform"
+                self.jwt_secret, 
+                algorithms=[self.jwt_algorithm]
             )
+            
+            # Check expiration
+            if payload.get("exp", 0) < time.time():
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token expired"
+                )
+            
             return payload
-        except jwt.ExpiredSignatureError:
-            raise AuthenticationError("Token has expired")
         except jwt.InvalidTokenError:
-            raise AuthenticationError("Invalid token")
-        except jwt.InvalidIssuerError:
-            raise AuthenticationError("Invalid token issuer")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
     
-    async def get_current_user(
-        self, 
-        credentials: HTTPAuthorizationCredentials = Depends(security)
-    ) -> Dict[str, Any]:
-        """Get current user from JWT token"""
-        
+    def verify_api_key(self, api_key: str) -> bool:
+        """Verify API key"""
         if not settings.ENABLE_AUTH:
-            # Return mock user for development only
-            return {
-                "id": "dev-user",
-                "email": "dev@example.com",
-                "role": "admin",
-                "permissions": ["*"]
-            }
+            return True
         
-        try:
-            payload = self.verify_token(credentials.credentials)
-            
-            user_id = payload.get("sub")
-            if not user_id:
-                raise AuthenticationError("Invalid token payload")
-            
-            # Validate user still exists and is active
-            user_data = await self.validate_user_active(user_id)
-            
-            return {
-                "id": user_id,
-                "email": payload.get("email"),
-                "role": payload.get("role", "user"),
-                "permissions": payload.get("permissions", []),
-                "active": user_data.get("active", True)
-            }
-            
-        except AuthenticationError as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=str(e),
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    
-    async def validate_user_active(self, user_id: str) -> Dict[str, Any]:
-        """Validate that a user is still active"""
-        # In a real implementation, this would check a user database
-        # For now, assume all users are active
-        return {"active": True}
-    
-    def hash_password(self, password: str) -> str:
-        """Hash a password using bcrypt"""
-        salt = bcrypt.gensalt()
-        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-        return hashed.decode('utf-8')
-    
-    def verify_password(self, password: str, hashed_password: str) -> bool:
-        """Verify a password against its hash"""
-        return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
-    
-    async def authenticate_with_oauth(self, provider: str, code: str) -> Dict[str, Any]:
-        """Authenticate user with OAuth provider"""
-        if provider == "github":
-            return await self.authenticate_github(code)
-        elif provider == "google":
-            return await self.authenticate_google(code)
-        else:
-            raise AuthenticationError(f"Unsupported OAuth provider: {provider}")
-    
-    async def authenticate_github(self, code: str) -> Dict[str, Any]:
-        """Authenticate with GitHub OAuth"""
-        if not settings.GITHUB_CLIENT_ID or not settings.GITHUB_CLIENT_SECRET:
-            raise AuthenticationError("GitHub OAuth not configured")
+        # Check against allowed API keys
+        if settings.ALLOWED_API_KEYS and api_key in settings.ALLOWED_API_KEYS:
+            return True
         
-        async with httpx.AsyncClient() as client:
-            # Exchange code for access token
-            token_response = await client.post(
-                "https://github.com/login/oauth/access_token",
-                data={
-                    "client_id": settings.GITHUB_CLIENT_ID,
-                    "client_secret": settings.GITHUB_CLIENT_SECRET,
-                    "code": code
-                },
-                headers={"Accept": "application/json"}
-            )
-            
-            if token_response.status_code != 200:
-                raise AuthenticationError("Failed to exchange code for token")
-            
-            token_data = token_response.json()
-            access_token = token_data.get("access_token")
-            
-            if not access_token:
-                raise AuthenticationError("No access token received")
-            
-            # Get user info
-            user_response = await client.get(
-                "https://api.github.com/user",
-                headers={"Authorization": f"Bearer {access_token}"}
-            )
-            
-            if user_response.status_code != 200:
-                raise AuthenticationError("Failed to get user info")
-            
-            user_data = user_response.json()
-            
-            return {
-                "id": str(user_data["id"]),
-                "email": user_data.get("email"),
-                "name": user_data.get("name"),
-                "avatar_url": user_data.get("avatar_url"),
-                "provider": "github"
-            }
-    
-    async def authenticate_google(self, code: str) -> Dict[str, Any]:
-        """Authenticate with Google OAuth"""
-        if not settings.GOOGLE_OAUTH_CLIENT_ID or not settings.GOOGLE_OAUTH_CLIENT_SECRET:
-            raise AuthenticationError("Google OAuth not configured")
+        # For development, allow a default key
+        if settings.DEBUG and api_key == "dev-key":
+            return True
         
-        async with httpx.AsyncClient() as client:
-            # Exchange code for access token
-            token_response = await client.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
-                    "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": "postmessage"  # For web applications
-                }
-            )
-            
-            if token_response.status_code != 200:
-                raise AuthenticationError("Failed to exchange code for token")
-            
-            token_data = token_response.json()
-            access_token = token_data.get("access_token")
-            
-            if not access_token:
-                raise AuthenticationError("No access token received")
-            
-            # Get user info
-            user_response = await client.get(
-                "https://www.googleapis.com/oauth2/v2/userinfo",
-                headers={"Authorization": f"Bearer {access_token}"}
-            )
-            
-            if user_response.status_code != 200:
-                raise AuthenticationError("Failed to get user info")
-            
-            user_data = user_response.json()
-            
-            return {
-                "id": user_data["id"],
-                "email": user_data.get("email"),
-                "name": user_data.get("name"),
-                "avatar_url": user_data.get("picture"),
-                "provider": "google"
-            }
-    
-    def create_user_token(self, user_data: Dict[str, Any]) -> str:
-        """Create a JWT token for authenticated user"""
-        token_data = {
-            "sub": user_data["id"],
-            "email": user_data.get("email"),
-            "name": user_data.get("name"),
-            "role": "user",  # Default role
-            "permissions": ["read", "write"],  # Default permissions
-            "provider": user_data.get("provider", "local")
-        }
-        
-        return self.create_access_token(token_data)
+        return False
 
-# Global auth middleware instance
 auth_middleware = AuthMiddleware()
-
-# Convenience functions
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    """Create a JWT access token"""
-    return auth_middleware.create_access_token(data, expires_delta)
-
-def verify_token(token: str) -> Dict[str, Any]:
-    """Verify and decode a JWT token"""
-    return auth_middleware.verify_token(token)
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> Dict[str, Any]:
-    """Get current user from JWT token"""
-    return await auth_middleware.get_current_user(credentials)
+    """Get current authenticated user"""
+    
+    if not settings.ENABLE_AUTH:
+        # Return mock user for development
+        return {
+            "user_id": "dev-user",
+            "email": "dev@example.com",
+            "is_authenticated": True
+        }
+    
+    token = credentials.credentials
+    
+    # Check if it's an API key format (simple string) or JWT
+    if token.startswith("sk-") or token == "dev-key":
+        # API key authentication
+        if auth_middleware.verify_api_key(token):
+            return {
+                "user_id": f"api-key-user-{hash(token) % 10000}",
+                "email": "api@example.com",
+                "is_authenticated": True,
+                "auth_type": "api_key"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key"
+            )
+    else:
+        # JWT authentication
+        payload = auth_middleware.verify_token(token)
+        return {
+            "user_id": payload.get("sub", "unknown"),
+            "email": payload.get("email", "unknown@example.com"),
+            "is_authenticated": True,
+            "auth_type": "jwt",
+            "payload": payload
+        }
 
-def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
-    return auth_middleware.hash_password(password)
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Optional[Dict[str, Any]]:
+    """Get current user if authenticated, otherwise None"""
+    
+    if not credentials:
+        return None
+    
+    try:
+        return await get_current_user(credentials)
+    except HTTPException:
+        return None
 
-def verify_password(password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash"""
-    return auth_middleware.verify_password(password, hashed_password)
+def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Require admin privileges"""
+    
+    # Check if user has admin role
+    if current_user.get("auth_type") == "api_key":
+        # API key users have admin access
+        return current_user
+    
+    # Check JWT payload for admin role
+    payload = current_user.get("payload", {})
+    roles = payload.get("roles", [])
+    
+    if "admin" not in roles and not current_user.get("is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    
+    return current_user
 
-async def authenticate_with_oauth(provider: str, code: str) -> Dict[str, Any]:
-    """Authenticate user with OAuth provider"""
-    return await auth_middleware.authenticate_with_oauth(provider, code)
+class RateLimitedAuth:
+    """Rate-limited authentication to prevent brute force attacks"""
+    
+    def __init__(self):
+        self.failed_attempts: Dict[str, list] = {}
+        self.max_attempts = 10
+        self.window_size = 300  # 5 minutes
+    
+    def is_rate_limited(self, identifier: str) -> bool:
+        """Check if identifier is rate limited"""
+        now = time.time()
+        
+        if identifier not in self.failed_attempts:
+            return False
+        
+        # Clean old attempts
+        self.failed_attempts[identifier] = [
+            attempt_time for attempt_time in self.failed_attempts[identifier]
+            if now - attempt_time < self.window_size
+        ]
+        
+        # Check if over limit
+        return len(self.failed_attempts[identifier]) >= self.max_attempts
+    
+    def record_failed_attempt(self, identifier: str):
+        """Record a failed authentication attempt"""
+        now = time.time()
+        
+        if identifier not in self.failed_attempts:
+            self.failed_attempts[identifier] = []
+        
+        self.failed_attempts[identifier].append(now)
 
-def create_user_token(user_data: Dict[str, Any]) -> str:
-    """Create a JWT token for authenticated user"""
-    return auth_middleware.create_user_token(user_data)
+rate_limited_auth = RateLimitedAuth()
+
+async def rate_limited_get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> Dict[str, Any]:
+    """Get current user with rate limiting"""
+    
+    # Use IP address as identifier (in production, get from request)
+    identifier = "default-ip"  # This would be extracted from request.client.host
+    
+    if rate_limited_auth.is_rate_limited(identifier):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed authentication attempts. Try again later."
+        )
+    
+    try:
+        return await get_current_user(credentials)
+    except HTTPException as e:
+        if e.status_code == status.HTTP_401_UNAUTHORIZED:
+            rate_limited_auth.record_failed_attempt(identifier)
+        raise
+
+# Mock authentication for development
+async def mock_auth() -> Dict[str, Any]:
+    """Mock authentication for testing"""
+    return {
+        "user_id": "mock-user-123",
+        "email": "mock@example.com",
+        "is_authenticated": True,
+        "auth_type": "mock"
+    }
