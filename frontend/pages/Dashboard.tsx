@@ -1,246 +1,420 @@
-import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { UserButton } from '@clerk/clerk-react';
-import { Plus, FolderOpen, Settings, Code, Sparkles, Search } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import React, { useState, useEffect } from 'react';
+import { useUser } from '@clerk/clerk-react';
+import { Plus, Search, Filter, Grid, List, Sparkles, Rocket, Code, Database } from 'lucide-react';
 import { useBackend } from '../hooks/useBackend';
 import { useToast } from '@/components/ui/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import ProjectCard from '../components/ProjectCard';
 import CreateProjectDialog from '../components/CreateProjectDialog';
 import TemplateSelector from '../components/TemplateSelector';
 
-export default function Dashboard() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(false);
+interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  templateType: string;
+  templateName: string;
+  status: string;
+  gitUrl?: string;
+  deployUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AgentSession {
+  id: string;
+  type: string;
+  status: string;
+  progress: {
+    percentage: number;
+    currentTask?: string;
+  };
+  startedAt: string;
+}
+
+const Dashboard: React.FC = () => {
+  const { user } = useUser();
   const backend = useBackend();
   const { toast } = useToast();
+  
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
 
-  const { data: projectsData, isLoading, refetch } = useQuery({
-    queryKey: ['projects'],
-    queryFn: async () => {
-      try {
-        return await backend.projects.list();
-      } catch (error) {
-        console.error('Failed to fetch projects:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load projects',
-          variant: 'destructive',
-        });
-        throw error;
-      }
-    },
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      const [projectsResult] = await Promise.all([
+        backend.projects.list(),
+      ]);
+      
+      setProjects(projectsResult.projects);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load dashboard data",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateProject = async (projectData: any) => {
+    try {
+      const newProject = await backend.projects.create(projectData);
+      setProjects(prev => [newProject, ...prev]);
+      setShowCreateDialog(false);
+      toast({
+        title: "Success",
+        description: "Project created successfully",
+      });
+    } catch (error) {
+      console.error('Error creating project:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create project",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      await backend.projects.deleteProject({ id: projectId });
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+      toast({
+        title: "Success",
+        description: "Project deleted successfully",
+      });
+    } catch (error) {
+      console.error('Error deleting project:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete project",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const filteredProjects = projects.filter(project => {
+    const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         project.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || project.status === statusFilter;
+    return matchesSearch && matchesStatus;
   });
 
-  const { data: userInfo } = useQuery({
-    queryKey: ['user'],
-    queryFn: async () => {
-      try {
-        return await backend.auth.getUserInfo();
-      } catch (error) {
-        console.error('Failed to fetch user info:', error);
-        return null;
-      }
-    },
-  });
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'ready': return 'bg-green-500';
+      case 'building': return 'bg-yellow-500';
+      case 'deploying': return 'bg-blue-500';
+      case 'deployed': return 'bg-purple-500';
+      case 'error': return 'bg-red-500';
+      default: return 'bg-gray-500';
+    }
+  };
 
-  const filteredProjects = projectsData?.projects.filter(project =>
-    project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    project.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  const getRecentActivity = () => {
+    return [
+      { action: 'Created project "E-commerce Platform"', time: '2 hours ago', icon: Plus },
+      { action: 'Deployed "Blog Website" to production', time: '4 hours ago', icon: Rocket },
+      { action: 'AI generated components for "Dashboard App"', time: '6 hours ago', icon: Sparkles },
+      { action: 'Started collaboration session', time: '1 day ago', icon: Code },
+    ];
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="text-muted-foreground">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b bg-card">
+      <header className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
-                <Sparkles className="h-8 w-8 text-primary" />
-                <span className="text-2xl font-bold text-foreground">Myco</span>
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                  <Code className="w-5 h-5 text-white" />
+                </div>
+                <h1 className="text-2xl font-bold text-foreground">Myco AI Platform</h1>
               </div>
-              <Badge variant="secondary" className="hidden sm:inline-flex">
-                Multi-Agent Platform
-              </Badge>
             </div>
             
             <div className="flex items-center space-x-4">
-              <div className="relative hidden md:block">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <Input
-                  placeholder="Search projects..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 w-64"
-                />
-              </div>
-              
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setShowTemplates(true)}
+                onClick={() => setShowTemplateSelector(true)}
               >
-                <Code className="h-4 w-4 mr-2" />
-                Templates
+                <Sparkles className="w-4 h-4 mr-2" />
+                Browse Templates
               </Button>
               
-              <Button
-                onClick={() => setShowCreateDialog(true)}
-                size="sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
+              <Button onClick={() => setShowCreateDialog(true)}>
+                <Plus className="w-4 h-4 mr-2" />
                 New Project
               </Button>
               
-              <UserButton />
+              <Avatar className="w-8 h-8">
+                <AvatarImage src={user?.imageUrl} />
+                <AvatarFallback>
+                  {user?.firstName?.charAt(0) || user?.emailAddresses[0]?.emailAddress.charAt(0)}
+                </AvatarFallback>
+              </Avatar>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
-        {/* Welcome Section */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">
-            Welcome back{userInfo?.firstName ? `, ${userInfo.firstName}` : ''}!
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Build, collaborate, and deploy with AI-powered development tools.
-          </p>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setShowCreateDialog(true)}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center space-x-2">
-                <Plus className="h-5 w-5 text-primary" />
-                <CardTitle className="text-lg">Create Project</CardTitle>
+      <div className="container mx-auto px-6 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+          {/* Main Content */}
+          <div className="lg:col-span-3 space-y-6">
+            {/* Welcome Section */}
+            <div className="bg-gradient-to-r from-blue-500/10 to-purple-600/10 rounded-lg p-6 border">
+              <h2 className="text-2xl font-bold text-foreground mb-2">
+                Welcome back, {user?.firstName || 'Developer'}! 👋
+              </h2>
+              <p className="text-muted-foreground mb-4">
+                Ready to build something amazing? Your AI-powered development platform is at your service.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={() => setShowCreateDialog(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Start New Project
+                </Button>
+                <Button variant="outline" onClick={() => setShowTemplateSelector(true)}>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Explore Templates
+                </Button>
               </div>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Start a new project with AI-powered scaffolding and templates.
-              </CardDescription>
-            </CardContent>
-          </Card>
-          
-          <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setShowTemplates(true)}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center space-x-2">
-                <Code className="h-5 w-5 text-primary" />
-                <CardTitle className="text-lg">Browse Templates</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Explore pre-built templates for React, Node.js, Python, and more.
-              </CardDescription>
-            </CardContent>
-          </Card>
-          
-          <Card className="cursor-pointer hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-3">
-              <div className="flex items-center space-x-2">
-                <Sparkles className="h-5 w-5 text-primary" />
-                <CardTitle className="text-lg">AI Assistant</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>
-                Get help with code generation, debugging, and architecture.
-              </CardDescription>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Projects Section */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-foreground">Your Projects</h2>
-            <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-              <FolderOpen className="h-4 w-4" />
-              <span>{filteredProjects.length} projects</span>
             </div>
-          </div>
 
-          {/* Mobile Search */}
-          <div className="md:hidden mb-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Search projects..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-2">
+                    <Database className="w-5 h-5 text-blue-500" />
+                    <div>
+                      <p className="text-2xl font-bold">{projects.length}</p>
+                      <p className="text-sm text-muted-foreground">Total Projects</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-2">
+                    <Rocket className="w-5 h-5 text-green-500" />
+                    <div>
+                      <p className="text-2xl font-bold">
+                        {projects.filter(p => p.status === 'deployed').length}
+                      </p>
+                      <p className="text-sm text-muted-foreground">Deployed</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-2">
+                    <Sparkles className="w-5 h-5 text-purple-500" />
+                    <div>
+                      <p className="text-2xl font-bold">0</p>
+                      <p className="text-sm text-muted-foreground">AI Sessions</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          </div>
 
-          {isLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[1, 2, 3].map((i) => (
-                <Card key={i} className="animate-pulse">
-                  <CardHeader>
-                    <div className="h-4 bg-muted rounded w-3/4"></div>
-                    <div className="h-3 bg-muted rounded w-1/2"></div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-3 bg-muted rounded w-full mb-2"></div>
-                    <div className="h-3 bg-muted rounded w-2/3"></div>
+            {/* Projects Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold text-foreground">Your Projects</h3>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant={viewMode === 'grid' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setViewMode('grid')}
+                  >
+                    <Grid className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant={viewMode === 'list' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setViewMode('list')}
+                  >
+                    <List className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                  <Input
+                    placeholder="Search projects..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full sm:w-48">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="creating">Creating</SelectItem>
+                    <SelectItem value="ready">Ready</SelectItem>
+                    <SelectItem value="building">Building</SelectItem>
+                    <SelectItem value="deployed">Deployed</SelectItem>
+                    <SelectItem value="error">Error</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Projects Grid/List */}
+              {filteredProjects.length === 0 ? (
+                <Card>
+                  <CardContent className="p-12 text-center">
+                    <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Code className="w-8 h-8 text-muted-foreground" />
+                    </div>
+                    <h3 className="text-lg font-semibold mb-2">No projects found</h3>
+                    <p className="text-muted-foreground mb-4">
+                      {searchQuery || statusFilter !== 'all'
+                        ? 'Try adjusting your search or filter criteria.'
+                        : 'Get started by creating your first project.'}
+                    </p>
+                    {!searchQuery && statusFilter === 'all' && (
+                      <Button onClick={() => setShowCreateDialog(true)}>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Create Your First Project
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-          ) : filteredProjects.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredProjects.map((project) => (
-                <ProjectCard key={project.id} project={project} onUpdate={refetch} />
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-foreground mb-2">
-                {searchQuery ? 'No projects found' : 'No projects yet'}
-              </h3>
-              <p className="text-muted-foreground mb-4">
-                {searchQuery 
-                  ? 'Try adjusting your search terms.'
-                  : 'Create your first project to get started building with AI.'}
-              </p>
-              {!searchQuery && (
-                <Button onClick={() => setShowCreateDialog(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Project
-                </Button>
+              ) : (
+                <div className={viewMode === 'grid' 
+                  ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6' 
+                  : 'space-y-4'
+                }>
+                  {filteredProjects.map((project) => (
+                    <ProjectCard
+                      key={project.id}
+                      project={project}
+                      viewMode={viewMode}
+                      onDelete={handleDeleteProject}
+                    />
+                  ))}
+                </div>
               )}
             </div>
-          )}
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Recent Activity */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Recent Activity</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {getRecentActivity().map((activity, index) => (
+                  <div key={index} className="flex items-start space-x-3">
+                    <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center mt-0.5">
+                      <activity.icon className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-foreground">{activity.action}</p>
+                      <p className="text-xs text-muted-foreground">{activity.time}</p>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            {/* Quick Actions */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start"
+                  onClick={() => setShowCreateDialog(true)}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Project
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start"
+                  onClick={() => setShowTemplateSelector(true)}
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Browse Templates
+                </Button>
+                <Button variant="outline" className="w-full justify-start">
+                  <Code className="w-4 h-4 mr-2" />
+                  Import Repository
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-      </main>
+      </div>
 
       {/* Dialogs */}
       <CreateProjectDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
-        onSuccess={refetch}
+        onCreateProject={handleCreateProject}
       />
       
       <TemplateSelector
-        open={showTemplates}
-        onOpenChange={setShowTemplates}
+        open={showTemplateSelector}
+        onOpenChange={setShowTemplateSelector}
         onSelectTemplate={(template) => {
-          setShowTemplates(false);
+          setShowTemplateSelector(false);
           setShowCreateDialog(true);
         }}
       />
     </div>
   );
-}
+};
+
+export default Dashboard;

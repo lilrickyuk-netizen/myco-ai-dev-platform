@@ -1,68 +1,70 @@
-// Deployment environments and configurations
-export interface DeploymentEnvironment {
+export interface DeploymentProvider {
   id: string;
   name: string;
-  type: 'development' | 'staging' | 'production';
+  displayName: string;
+  type: ProviderType;
+  configSchema: Record<string, any>;
+  enabled: boolean;
+  createdAt: Date;
+}
+
+export type ProviderType = 'static' | 'container' | 'serverless' | 'edge';
+
+export interface Deployment {
+  id: string;
   projectId: string;
-  provider: 'aws' | 'gcp' | 'azure' | 'vercel' | 'netlify' | 'digitalocean' | 'heroku';
-  region: string;
-  status: 'active' | 'inactive' | 'deploying' | 'failed';
+  providerId: string;
+  name: string;
+  environment: string;
+  status: DeploymentStatus;
   config: Record<string, any>;
-  domainName?: string;
-  subdomain?: string;
-  customDomain?: string;
-  sslEnabled: boolean;
+  buildLogs?: string;
+  deployLogs?: string;
+  url?: string;
+  lastDeployedAt?: Date;
+  userId: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
+export type DeploymentStatus = 
+  | 'pending'
+  | 'building'
+  | 'deploying'
+  | 'deployed'
+  | 'failed'
+  | 'cancelled';
+
 export interface DeploymentHistory {
   id: string;
-  environmentId: string;
-  projectId: string;
+  deploymentId: string;
   version: string;
-  commitHash?: string;
-  status: 'pending' | 'building' | 'deploying' | 'success' | 'failed' | 'rolled_back';
-  logs: string[];
-  buildTime?: number;
-  deployTime?: number;
-  startedAt: Date;
-  completedAt?: Date;
+  status: DeploymentStatus;
+  commitSha?: string;
+  buildLogs?: string;
+  deployLogs?: string;
+  url?: string;
   deployedBy: string;
-  rollbackTarget?: string;
+  deployedAt: Date;
+  rollbackTo?: string;
 }
 
-export interface CreateEnvironmentRequest {
-  name: string;
-  type: 'development' | 'staging' | 'production';
-  projectId: string;
-  provider: 'aws' | 'gcp' | 'azure' | 'vercel' | 'netlify' | 'digitalocean' | 'heroku';
-  region: string;
-  config: Record<string, any>;
-  domainName?: string;
+export interface DeploymentConfig {
+  buildCommand?: string;
+  outputDirectory?: string;
+  environmentVariables?: Record<string, string>;
   customDomain?: string;
+  redirects?: Redirect[];
+  headers?: Header[];
 }
 
-export interface DeployRequest {
-  environmentId: string;
-  commitHash?: string;
-  buildConfig?: Record<string, any>;
-  envVars?: Record<string, string>;
+export interface Redirect {
+  source: string;
+  destination: string;
+  permanent: boolean;
 }
 
-export interface RollbackRequest {
-  environmentId: string;
-  targetDeploymentId: string;
-}
-
-export interface EnvironmentMetrics {
-  environmentId: string;
-  cpu: number;
-  memory: number;
-  storage: number;
-  bandwidth: number;
-  requests: number;
-  errors: number;
-  uptime: number;
-  timestamp: Date;
+export interface Header {
+  source: string;
+  headers: Record<string, string>;
 }

@@ -19,12 +19,16 @@ export interface AuthData {
   lastName: string | null;
 }
 
+// Configure the authorized parties.
 const AUTHORIZED_PARTIES = [
-  "https://*.lp.dev",
+  "https://myco-ai-dev-platform-d32ldfc82vjkjrpel8hg.lp.dev",
+  "http://localhost:5173",
+  "localhost:5173"
 ];
 
 const auth = authHandler<AuthParams, AuthData>(
   async (data) => {
+    // Resolve the authenticated user from the authorization header or session cookie.
     const token = data.authorization?.replace("Bearer ", "") ?? data.session?.value;
     if (!token) {
       throw APIError.unauthenticated("missing token");
@@ -50,4 +54,5 @@ const auth = authHandler<AuthParams, AuthData>(
   }
 );
 
+// Configure the API gateway to use the auth handler.
 export const gw = new Gateway({ authHandler: auth });

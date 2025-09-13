@@ -2,24 +2,30 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { projectsDB } from "./db";
 
-interface DeleteProjectRequest {
+export interface DeleteProjectParams {
   id: string;
 }
 
 // Deletes a project.
-export const deleteProject = api<DeleteProjectRequest, void>(
+export const deleteProject = api<DeleteProjectParams, void>(
   { auth: true, expose: true, method: "DELETE", path: "/projects/:id" },
-  async (req) => {
+  async ({ id }) => {
     const auth = getAuthData()!;
-    
-    const result = await projectsDB.queryRow<{ count: number }>`
-      DELETE FROM projects 
-      WHERE id = ${req.id} AND user_id = ${auth.userID}
-      RETURNING 1 as count
+
+    // Check if project exists and belongs to user
+    const existing = await projectsDB.queryRow`
+      SELECT id FROM projects 
+      WHERE id = ${id} AND user_id = ${auth.userID}
     `;
 
-    if (!result) {
-      throw APIError.notFound("project not found or access denied");
+    if (!existing) {
+      throw APIError.notFound("Project not found");
     }
+
+    // Delete the project (cascades to related tables)
+    await projectsDB.exec`
+      DELETE FROM projects 
+      WHERE id = ${id} AND user_id = ${auth.userID}
+    `;
   }
 );

@@ -1,5 +1,5 @@
 import { SQLDatabase } from "encore.dev/storage/sqldb";
 
-export const DB = new SQLDatabase("execution", {
+export const executionDB = new SQLDatabase("execution", {
   migrations: "./migrations",
 });

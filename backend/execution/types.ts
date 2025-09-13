@@ -1,77 +1,67 @@
 export interface ExecutionEnvironment {
   id: string;
+  projectId: string;
   name: string;
-  runtime: 'node' | 'python' | 'java' | 'go' | 'rust' | 'php' | 'ruby' | 'dotnet';
+  runtime: string;
   version: string;
-  image: string;
-  status: 'creating' | 'running' | 'stopped' | 'failed' | 'terminated';
-  projectId: string;
+  status: EnvironmentStatus;
   containerId?: string;
-  ports: Record<string, number>;
-  environment: Record<string, string>;
-  resources: {
-    cpu: number;
-    memory: number;
-    storage: number;
-  };
+  port?: number;
+  cpuLimit: string;
+  memoryLimit: string;
+  userId: string;
   createdAt: Date;
-  lastUsedAt: Date;
+  updatedAt: Date;
 }
 
-export interface ExecutionRequest {
-  projectId: string;
-  command: string;
-  workingDirectory?: string;
-  environment?: Record<string, string>;
-  timeout?: number;
-  runtime?: 'node' | 'python' | 'java' | 'go' | 'rust' | 'php' | 'ruby' | 'dotnet';
-}
+export type EnvironmentStatus = 
+  | 'creating'
+  | 'ready'
+  | 'running'
+  | 'stopped'
+  | 'error'
+  | 'destroyed';
 
-export interface ExecutionResult {
-  id: string;
-  command: string;
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  duration: number;
-  startedAt: Date;
-  completedAt: Date;
-  environment: string;
-}
-
-export interface CreateEnvironmentRequest {
-  projectId: string;
-  runtime: 'node' | 'python' | 'java' | 'go' | 'rust' | 'php' | 'ruby' | 'dotnet';
-  version?: string;
-  name?: string;
-  environment?: Record<string, string>;
-  resources?: {
-    cpu?: number;
-    memory?: number;
-    storage?: number;
-  };
-}
-
-export interface TerminalSession {
+export interface ExecutionSession {
   id: string;
   environmentId: string;
-  projectId: string;
-  status: 'active' | 'closed';
-  createdAt: Date;
-  lastActivityAt: Date;
+  command: string;
+  status: SessionStatus;
+  exitCode?: number;
+  output?: string;
+  errorOutput?: string;
+  userId: string;
+  startedAt: Date;
+  completedAt?: Date;
 }
 
-export interface TerminalMessage {
+export type SessionStatus = 
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface ExecutionLog {
+  id: string;
   sessionId: string;
-  type: 'input' | 'output' | 'error' | 'system';
-  content: string;
   timestamp: Date;
+  level: LogLevel;
+  message: string;
+  source: LogSource;
 }
 
-export interface PackageManagerOperation {
-  projectId: string;
-  manager: 'npm' | 'yarn' | 'pnpm' | 'pip' | 'poetry' | 'maven' | 'gradle' | 'cargo' | 'composer' | 'gem';
-  operation: 'install' | 'uninstall' | 'update' | 'list' | 'audit';
-  packages?: string[];
-  options?: Record<string, any>;
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogSource = 'stdout' | 'stderr' | 'system';
+
+export interface Runtime {
+  name: string;
+  displayName: string;
+  versions: string[];
+  dockerImage: string;
+  defaultCommand: string;
+  packageManager?: string;
+  installCommand?: string;
+  runCommand?: string;
+  buildCommand?: string;
+  extensions: string[];
 }

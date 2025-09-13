@@ -1,44 +1,49 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { filesDB } from "./db";
-import { FileItem } from "./types";
-import { projects } from "~encore/clients";
+import { projectsDB } from "../projects/db";
+import { File } from "./types";
 
-interface GetFileRequest {
-  projectId: string;
-  path: string;
+export interface GetFileParams {
+  id: string;
 }
 
-// Gets a file's content.
-export const get = api<GetFileRequest, FileItem>(
-  { auth: true, expose: true, method: "GET", path: "/files/:projectId/*path" },
-  async (req) => {
+// Gets a specific file by ID.
+export const get = api<GetFileParams, File>(
+  { auth: true, expose: true, method: "GET", path: "/files/file/:id" },
+  async ({ id }) => {
     const auth = getAuthData()!;
-    
-    // Verify user has access to the project
-    try {
-      await projects.get({ id: req.projectId });
-    } catch (err) {
-      throw APIError.permissionDenied("access denied to project");
-    }
 
-    const file = await filesDB.queryRow<FileItem>`
+    const file = await filesDB.queryRow<File>`
       SELECT 
         id,
         project_id as "projectId",
+        name,
         path,
         content,
-        content_type as "contentType",
+        mime_type as "mimeType",
         size_bytes as "sizeBytes",
         is_directory as "isDirectory",
+        parent_id as "parentId",
+        user_id as "userId",
         created_at as "createdAt",
         updated_at as "updatedAt"
-      FROM project_files 
-      WHERE project_id = ${req.projectId} AND path = ${req.path}
+      FROM files 
+      WHERE id = ${id}
     `;
 
     if (!file) {
-      throw APIError.notFound("file not found");
+      throw APIError.notFound("File not found");
+    }
+
+    // Verify user has access to the project
+    const project = await projectsDB.queryRow`
+      SELECT id FROM projects 
+      WHERE id = ${file.projectId} AND user_id = ${auth.userID}
+    `;
+
+    if (!project) {
+      throw APIError.notFound("Project not found");
     }
 
     return file;

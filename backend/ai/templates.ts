@@ -1,210 +1,63 @@
-import { api } from "encore.dev/api";
-import { getAuthData } from "~encore/auth";
-
 export interface Template {
-  id: string;
   name: string;
-  description: string;
-  category: string;
   language: string;
   framework?: string;
   files: TemplateFile[];
-  dependencies?: string[];
-  scripts?: Record<string, string>;
+  dependencies: string[];
+  scripts: Record<string, string>;
 }
 
 export interface TemplateFile {
   path: string;
   content: string;
-  contentType: string;
+  description: string;
 }
 
-interface GetTemplatesResponse {
-  templates: Template[];
-}
-
-// Gets all available project templates.
-export const getTemplates = api<void, GetTemplatesResponse>(
-  { auth: true, expose: true, method: "GET", path: "/ai/templates" },
-  async () => {
-    const auth = getAuthData()!;
-    
-    return {
-      templates: [
-        {
-          id: "react-typescript",
-          name: "React + TypeScript",
-          description: "Modern React application with TypeScript, Vite, and Tailwind CSS",
-          category: "Frontend",
-          language: "TypeScript",
-          framework: "React",
-          files: [
-            {
-              path: "src/App.tsx",
-              content: getReactAppTemplate(),
-              contentType: "text/typescript",
-            },
-            {
-              path: "src/main.tsx",
-              content: getReactMainTemplate(),
-              contentType: "text/typescript",
-            },
-            {
-              path: "index.html",
-              content: getReactIndexTemplate(),
-              contentType: "text/html",
-            },
-            {
-              path: "src/index.css",
-              content: getReactCSSTemplate(),
-              contentType: "text/css",
-            },
-          ],
-          dependencies: [
-            "react",
-            "react-dom",
-            "@types/react",
-            "@types/react-dom",
-            "typescript",
-            "vite",
-            "@vitejs/plugin-react",
-            "tailwindcss",
-            "autoprefixer",
-            "postcss",
-          ],
-          scripts: {
-            "dev": "vite",
-            "build": "tsc && vite build",
-            "preview": "vite preview",
-          },
-        },
-        {
-          id: "nodejs-express",
-          name: "Node.js + Express",
-          description: "RESTful API server with Express.js and TypeScript",
-          category: "Backend",
-          language: "TypeScript",
-          framework: "Express",
-          files: [
-            {
-              path: "src/index.ts",
-              content: getExpressIndexTemplate(),
-              contentType: "text/typescript",
-            },
-            {
-              path: "src/routes/api.ts",
-              content: getExpressRoutesTemplate(),
-              contentType: "text/typescript",
-            },
-          ],
-          dependencies: [
-            "express",
-            "@types/express",
-            "typescript",
-            "ts-node",
-            "nodemon",
-            "cors",
-            "@types/cors",
-          ],
-          scripts: {
-            "dev": "nodemon src/index.ts",
-            "build": "tsc",
-            "start": "node dist/index.js",
-          },
-        },
-        {
-          id: "nextjs-typescript",
-          name: "Next.js + TypeScript",
-          description: "Full-stack React application with Next.js and TypeScript",
-          category: "Full-stack",
-          language: "TypeScript",
-          framework: "Next.js",
-          files: [
-            {
-              path: "pages/index.tsx",
-              content: getNextjsIndexTemplate(),
-              contentType: "text/typescript",
-            },
-            {
-              path: "pages/api/hello.ts",
-              content: getNextjsAPITemplate(),
-              contentType: "text/typescript",
-            },
-          ],
-          dependencies: [
-            "next",
-            "react",
-            "react-dom",
-            "@types/react",
-            "@types/react-dom",
-            "typescript",
-          ],
-          scripts: {
-            "dev": "next dev",
-            "build": "next build",
-            "start": "next start",
-          },
-        },
-      ],
-    };
-  }
-);
-
-function getReactAppTemplate(): string {
-  return `import React from 'react';
-import './index.css';
+const templates: Template[] = [
+  {
+    name: "react-typescript",
+    language: "typescript",
+    framework: "react",
+    files: [
+      {
+        path: "src/App.tsx",
+        content: `import React from 'react';
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
       <div className="text-center">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">
-          Welcome to React + TypeScript
+        <h1 className="text-4xl font-bold text-gray-800 mb-4">
+          Welcome to Your React App
         </h1>
-        <p className="text-lg text-gray-600 mb-8">
-          Your project is ready to go!
+        <p className="text-gray-600">
+          Start building something amazing!
         </p>
-        <button className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition-colors">
-          Get Started
-        </button>
       </div>
     </div>
   );
 }
 
-export default App;`;
-}
-
-function getReactMainTemplate(): string {
-  return `import React from 'react';
+export default App;`,
+        description: "Main React application component"
+      },
+      {
+        path: "src/main.tsx",
+        content: `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
-);`;
-}
-
-function getReactIndexTemplate(): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>React + TypeScript App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>`;
-}
-
-function getReactCSSTemplate(): string {
-  return `@tailwind base;
+);`,
+        description: "Application entry point"
+      },
+      {
+        path: "src/index.css",
+        content: `@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -215,72 +68,140 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}`;
-}
-
-function getExpressIndexTemplate(): string {
-  return `import express from 'express';
+}`,
+        description: "Global styles"
+      },
+      {
+        path: "package.json",
+        content: JSON.stringify({
+          name: "react-typescript-app",
+          private: true,
+          version: "0.0.0",
+          type: "module",
+          scripts: {
+            dev: "vite",
+            build: "tsc && vite build",
+            preview: "vite preview"
+          },
+          dependencies: {
+            react: "^18.2.0",
+            "react-dom": "^18.2.0"
+          },
+          devDependencies: {
+            "@types/react": "^18.2.43",
+            "@types/react-dom": "^18.2.17",
+            "@vitejs/plugin-react": "^4.2.1",
+            autoprefixer: "^10.4.16",
+            postcss: "^8.4.32",
+            tailwindcss: "^3.3.6",
+            typescript: "^5.2.2",
+            vite: "^5.0.8"
+          }
+        }, null, 2),
+        description: "Package configuration"
+      }
+    ],
+    dependencies: ["react", "react-dom", "@types/react", "@types/react-dom", "vite", "typescript", "tailwindcss"],
+    scripts: {
+      dev: "vite",
+      build: "tsc && vite build",
+      preview: "vite preview"
+    }
+  },
+  {
+    name: "express-typescript",
+    language: "typescript",
+    framework: "express",
+    files: [
+      {
+        path: "src/index.ts",
+        content: `import express from 'express';
 import cors from 'cors';
-import apiRoutes from './routes/api';
+import helmet from 'helmet';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use('/api', apiRoutes);
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
 
-app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to Express + TypeScript API' });
+app.get('/api/users', (req, res) => {
+  res.json({ users: [] });
 });
 
 app.listen(PORT, () => {
   console.log(\`Server running on port \${PORT}\`);
-});`;
-}
-
-function getExpressRoutesTemplate(): string {
-  return `import { Router } from 'express';
-
-const router = Router();
-
-router.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-router.get('/users', (req, res) => {
-  res.json([
-    { id: 1, name: 'John Doe', email: 'john@example.com' },
-    { id: 2, name: 'Jane Smith', email: 'jane@example.com' },
-  ]);
-});
-
-export default router;`;
-}
-
-function getNextjsIndexTemplate(): string {
-  return `import type { NextPage } from 'next';
+});`,
+        description: "Express server entry point"
+      },
+      {
+        path: "package.json",
+        content: JSON.stringify({
+          name: "express-typescript-api",
+          version: "1.0.0",
+          description: "Express TypeScript API",
+          main: "dist/index.js",
+          scripts: {
+            build: "tsc",
+            start: "node dist/index.js",
+            dev: "ts-node-dev --respawn src/index.ts",
+            test: "jest"
+          },
+          dependencies: {
+            express: "^4.18.2",
+            cors: "^2.8.5",
+            helmet: "^7.1.0"
+          },
+          devDependencies: {
+            "@types/express": "^4.17.21",
+            "@types/cors": "^2.8.17",
+            "@types/node": "^20.10.4",
+            "ts-node-dev": "^2.0.0",
+            typescript: "^5.3.3"
+          }
+        }, null, 2),
+        description: "Package configuration"
+      }
+    ],
+    dependencies: ["express", "cors", "helmet", "@types/express", "@types/cors", "@types/node", "typescript"],
+    scripts: {
+      build: "tsc",
+      start: "node dist/index.js",
+      dev: "ts-node-dev --respawn src/index.ts"
+    }
+  },
+  {
+    name: "nextjs-typescript",
+    language: "typescript",
+    framework: "nextjs",
+    files: [
+      {
+        path: "pages/index.tsx",
+        content: `import { NextPage } from 'next';
 import Head from 'next/head';
 
 const Home: NextPage = () => {
   return (
     <div>
       <Head>
-        <title>Next.js + TypeScript App</title>
-        <meta name="description" content="Generated by create next app" />
-        <link rel="icon" href="/favicon.ico" />
+        <title>Next.js TypeScript App</title>
+        <meta name="description" content="Generated by AI" />
       </Head>
 
-      <main className="min-h-screen flex items-center justify-center bg-gray-50">
+      <main className="min-h-screen flex items-center justify-center bg-gray-100">
         <div className="text-center">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            Welcome to Next.js + TypeScript
+          <h1 className="text-4xl font-bold text-gray-800 mb-4">
+            Welcome to Next.js!
           </h1>
-          <p className="text-lg text-gray-600">
-            Your full-stack application is ready!
+          <p className="text-gray-600">
+            Get started by editing pages/index.tsx
           </p>
         </div>
       </main>
@@ -288,20 +209,59 @@ const Home: NextPage = () => {
   );
 };
 
-export default Home;`;
+export default Home;`,
+        description: "Home page component"
+      },
+      {
+        path: "package.json",
+        content: JSON.stringify({
+          name: "nextjs-typescript-app",
+          version: "0.1.0",
+          private: true,
+          scripts: {
+            dev: "next dev",
+            build: "next build",
+            start: "next start",
+            lint: "next lint"
+          },
+          dependencies: {
+            next: "14.0.4",
+            react: "^18",
+            "react-dom": "^18"
+          },
+          devDependencies: {
+            typescript: "^5",
+            "@types/node": "^20",
+            "@types/react": "^18",
+            "@types/react-dom": "^18",
+            autoprefixer: "^10.0.1",
+            postcss: "^8",
+            tailwindcss: "^3.3.0"
+          }
+        }, null, 2),
+        description: "Package configuration"
+      }
+    ],
+    dependencies: ["next", "react", "react-dom", "typescript", "@types/node", "@types/react", "tailwindcss"],
+    scripts: {
+      dev: "next dev",
+      build: "next build",
+      start: "next start"
+    }
+  }
+];
+
+export function getTemplate(language: string, framework?: string): Template | null {
+  return templates.find(t => 
+    t.language === language && 
+    (!framework || t.framework === framework)
+  ) || null;
 }
 
-function getNextjsAPITemplate(): string {
-  return `import type { NextApiRequest, NextApiResponse } from 'next';
+export function getAllTemplates(): Template[] {
+  return templates;
+}
 
-type Data = {
-  message: string;
-};
-
-export default function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<Data>
-) {
-  res.status(200).json({ message: 'Hello from Next.js API!' });
-}`;
+export function getTemplatesByLanguage(language: string): Template[] {
+  return templates.filter(t => t.language === language);
 }

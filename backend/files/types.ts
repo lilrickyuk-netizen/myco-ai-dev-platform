@@ -1,19 +1,36 @@
-export interface FileItem {
+export interface File {
   id: string;
   projectId: string;
+  name: string;
   path: string;
   content?: string;
-  contentType: string;
+  mimeType?: string;
   sizeBytes: number;
   isDirectory: boolean;
+  parentId?: string;
+  userId: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export interface FileTreeNode {
+export interface FileVersion {
+  id: string;
+  fileId: string;
+  content: string;
+  versionNumber: number;
+  userId: string;
+  commitMessage?: string;
+  createdAt: Date;
+}
+
+export interface FileTree {
+  id: string;
   name: string;
   path: string;
   isDirectory: boolean;
-  children?: FileTreeNode[];
-  size?: number;
+  children?: FileTree[];
+  content?: string;
+  mimeType?: string;
+  sizeBytes: number;
+  updatedAt: Date;
 }

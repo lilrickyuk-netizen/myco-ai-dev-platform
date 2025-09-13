@@ -1,30 +1,41 @@
-import React, { useState, useEffect } from 'react';
-import { Users, MessageSquare, X, Circle, Video, Share2, Crown } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Users, 
+  Send, 
+  MessageSquare, 
+  UserPlus, 
+  Settings, 
+  Video, 
+  Mic, 
+  MicOff,
+  VideoOff,
+  Phone
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useBackend } from '../hooks/useBackend';
+import { useUser } from '@clerk/clerk-react';
+import { useToast } from '@/components/ui/use-toast';
 
 interface CollaborationPanelProps {
-  isOpen: boolean;
-  onClose: () => void;
   projectId: string;
-  className?: string;
 }
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatar?: string;
-  status: 'online' | 'away' | 'offline';
-  role: 'owner' | 'collaborator' | 'viewer';
+interface Collaborator {
+  userId: string;
+  userName: string;
+  userColor: string;
+  isOnline: boolean;
+  lastSeen?: Date;
   cursor?: {
-    file: string;
     line: number;
     column: number;
+    file?: string;
   };
 }
 
@@ -37,288 +48,337 @@ interface ChatMessage {
   type: 'message' | 'system';
 }
 
-export default function CollaborationPanel({ isOpen, onClose, projectId, className }: CollaborationPanelProps) {
-  const [activeUsers, setActiveUsers] = useState<User[]>([
-    {
-      id: '1',
-      name: 'You',
-      email: 'user@example.com',
-      status: 'online',
-      role: 'owner',
-    },
-    {
-      id: '2',
-      name: 'Sarah Chen',
-      email: 'sarah@example.com',
-      status: 'online',
-      role: 'collaborator',
-      cursor: {
-        file: 'src/App.tsx',
-        line: 45,
-        column: 12,
-      },
-    },
-    {
-      id: '3',
-      name: 'Mike Johnson',
-      email: 'mike@example.com',
-      status: 'away',
-      role: 'viewer',
-    },
-  ]);
-
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: '1',
-      userId: 'system',
-      userName: 'System',
-      content: 'Sarah Chen joined the project',
-      timestamp: new Date(Date.now() - 300000),
-      type: 'system',
-    },
-    {
-      id: '2',
-      userId: '2',
-      userName: 'Sarah Chen',
-      content: 'Hey! Working on the authentication flow',
-      timestamp: new Date(Date.now() - 240000),
-      type: 'message',
-    },
-    {
-      id: '3',
-      userId: '1',
-      userName: 'You',
-      content: 'Great! I\'m updating the UI components',
-      timestamp: new Date(Date.now() - 180000),
-      type: 'message',
-    },
-  ]);
-
-  const [newMessage, setNewMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'chat'>('users');
+const CollaborationPanel: React.FC<CollaborationPanelProps> = ({ projectId }) => {
+  const { user } = useUser();
   const backend = useBackend();
+  const { toast } = useToast();
+  
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [activeTab, setActiveTab] = useState('chat');
+  
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<any>(null);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return 'text-green-500';
-      case 'away': return 'text-yellow-500';
-      case 'offline': return 'text-gray-400';
-      default: return 'text-gray-400';
+  useEffect(() => {
+    // Initialize collaboration connection
+    connectToCollaboration();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    // Auto-scroll chat to bottom
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
+  const connectToCollaboration = async () => {
+    try {
+      // This would connect to the collaboration websocket
+      // For now, we'll simulate the connection
+      setIsConnected(true);
+      
+      // Add welcome message
+      setChatMessages([{
+        id: '1',
+        userId: 'system',
+        userName: 'System',
+        content: 'Welcome to the collaboration session! You can chat with other team members here.',
+        timestamp: new Date(),
+        type: 'system'
+      }]);
+
+      // Simulate some collaborators
+      setCollaborators([
+        {
+          userId: user?.id || 'current-user',
+          userName: user?.firstName || 'You',
+          userColor: '#3b82f6',
+          isOnline: true,
+        }
+      ]);
+
+      toast({
+        title: "Connected",
+        description: "Joined collaboration session",
+      });
+    } catch (error) {
+      console.error('Error connecting to collaboration:', error);
+      toast({
+        title: "Connection Error",
+        description: "Failed to join collaboration session",
+        variant: "destructive",
+      });
     }
   };
 
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'owner': return 'bg-purple-100 text-purple-800';
-      case 'collaborator': return 'bg-blue-100 text-blue-800';
-      case 'viewer': return 'bg-gray-100 text-gray-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const handleSendMessage = () => {
-    if (!newMessage.trim()) return;
+  const sendChatMessage = () => {
+    if (!chatInput.trim() || !isConnected) return;
 
     const message: ChatMessage = {
       id: Date.now().toString(),
-      userId: '1',
-      userName: 'You',
-      content: newMessage.trim(),
+      userId: user?.id || 'anonymous',
+      userName: user?.firstName || user?.emailAddresses[0]?.emailAddress || 'Anonymous',
+      content: chatInput,
       timestamp: new Date(),
-      type: 'message',
+      type: 'message'
     };
 
     setChatMessages(prev => [...prev, message]);
-    setNewMessage('');
+    setChatInput('');
+
+    // In a real implementation, this would send through websocket
+    // wsRef.current?.send(JSON.stringify({ type: 'chat', data: message }));
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleChatKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      sendChatMessage();
     }
   };
 
-  const initiateVideoCall = () => {
-    // TODO: Implement video call functionality
-    console.log('Starting video call...');
+  const inviteCollaborator = () => {
+    // This would open an invite dialog
+    toast({
+      title: "Invite Link",
+      description: "Invite link copied to clipboard (feature coming soon)",
+    });
   };
 
-  const shareProject = () => {
-    // TODO: Implement project sharing
-    console.log('Sharing project...');
+  const startVoiceCall = () => {
+    toast({
+      title: "Voice Call",
+      description: "Voice calling feature coming soon",
+    });
   };
 
-  if (!isOpen) return null;
+  const startVideoCall = () => {
+    toast({
+      title: "Video Call",
+      description: "Video calling feature coming soon",
+    });
+  };
+
+  const getInitials = (name: string) => {
+    return name.split(' ').map(n => n[0]).join('').toUpperCase();
+  };
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
 
   return (
-    <div className={`bg-white border-l border-gray-200 flex flex-col ${className}`}>
+    <div className="h-full flex flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between bg-green-50 px-4 py-3 border-b border-green-200">
-        <div className="flex items-center gap-2">
-          <Users className="w-5 h-5 text-green-600" />
-          <h3 className="font-semibold text-gray-900">Collaboration</h3>
-          <Badge variant="secondary" className="text-xs">
-            {activeUsers.filter(u => u.status === 'online').length} online
-          </Badge>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={initiateVideoCall}
-            className="h-8 w-8 p-0 text-gray-500 hover:text-gray-700"
-            title="Start video call"
-          >
-            <Video className="w-4 h-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={shareProject}
-            className="h-8 w-8 p-0 text-gray-500 hover:text-gray-700"
-            title="Share project"
-          >
-            <Share2 className="w-4 h-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onClose}
-            className="h-8 w-8 p-0 text-gray-500 hover:text-gray-700"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-gray-200">
-        <button
-          onClick={() => setActiveTab('users')}
-          className={`flex-1 px-4 py-2 text-sm font-medium ${
-            activeTab === 'users'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Users ({activeUsers.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('chat')}
-          className={`flex-1 px-4 py-2 text-sm font-medium ${
-            activeTab === 'chat'
-              ? 'text-blue-600 border-b-2 border-blue-600'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
-          Chat
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-hidden">
-        {activeTab === 'users' && (
-          <div className="p-4 space-y-3">
-            {activeUsers.map((user) => (
-              <Card key={user.id} className="p-3">
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback className="text-xs">
-                        {user.name.split(' ').map(n => n[0]).join('')}
-                      </AvatarFallback>
-                    </Avatar>
-                    <Circle
-                      className={`absolute -bottom-1 -right-1 w-3 h-3 ${getStatusColor(user.status)} fill-current`}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm text-gray-900 truncate">
-                        {user.name}
-                      </span>
-                      {user.role === 'owner' && (
-                        <Crown className="w-3 h-3 text-yellow-500" />
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="outline" className={`text-xs ${getRoleColor(user.role)}`}>
-                        {user.role}
-                      </Badge>
-                      <span className="text-xs text-gray-500 capitalize">
-                        {user.status}
-                      </span>
-                    </div>
-                    {user.cursor && (
-                      <div className="text-xs text-gray-500 mt-1">
-                        Editing: {user.cursor.file}:{user.cursor.line}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            ))}
+      <div className="border-b bg-card/50 p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Users className="w-5 h-5 text-blue-500" />
+            <h3 className="font-semibold text-sm">Collaboration</h3>
+            <Badge variant={isConnected ? "default" : "secondary"} className="text-xs">
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </Badge>
           </div>
-        )}
+          
+          <div className="flex items-center space-x-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={startVoiceCall}
+            >
+              <Mic className="w-3 h-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={startVideoCall}
+            >
+              <Video className="w-3 h-3" />
+            </Button>
+          </div>
+        </div>
+      </div>
 
-        {activeTab === 'chat' && (
-          <div className="flex flex-col h-full">
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-2 mx-3 mt-3">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="users">Users ({collaborators.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="chat" className="flex-1 flex flex-col mt-3 mx-3">
+          {/* Chat Messages */}
+          <ScrollArea className="flex-1 mb-4" ref={chatScrollRef}>
+            <div className="space-y-3 p-2">
               {chatMessages.map((message) => (
-                <div key={message.id}>
+                <div key={message.id} className="space-y-1">
                   {message.type === 'system' ? (
-                    <div className="text-center text-xs text-gray-500 py-1">
-                      {message.content}
+                    <div className="text-center">
+                      <Badge variant="secondary" className="text-xs">
+                        {message.content}
+                      </Badge>
                     </div>
                   ) : (
-                    <div className={`flex ${message.userId === '1' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[80%] rounded-lg p-2 ${
-                        message.userId === '1'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-100 text-gray-900'
-                      }`}>
-                        {message.userId !== '1' && (
-                          <div className="text-xs font-medium mb-1">
-                            {message.userName}
-                          </div>
-                        )}
-                        <div className="text-sm">{message.content}</div>
-                        <div className={`text-xs mt-1 ${
-                          message.userId === '1' ? 'text-blue-200' : 'text-gray-500'
-                        }`}>
-                          {message.timestamp.toLocaleTimeString()}
+                    <div className="flex items-start space-x-2">
+                      <Avatar className="w-6 h-6">
+                        <AvatarFallback className="text-xs">
+                          {getInitials(message.userName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-medium">{message.userName}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatTime(message.timestamp)}
+                          </span>
                         </div>
+                        <p className="text-sm text-muted-foreground mt-1 break-words">
+                          {message.content}
+                        </p>
                       </div>
                     </div>
                   )}
                 </div>
               ))}
             </div>
+          </ScrollArea>
 
-            {/* Input */}
-            <div className="p-4 border-t border-gray-200">
-              <div className="flex gap-2">
-                <Input
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Type a message..."
-                  className="flex-1"
-                />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!newMessage.trim()}
-                  size="sm"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
+          {/* Chat Input */}
+          <div className="flex space-x-2">
+            <Input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={handleChatKeyDown}
+              placeholder="Type a message..."
+              className="flex-1"
+              disabled={!isConnected}
+            />
+            <Button
+              onClick={sendChatMessage}
+              disabled={!chatInput.trim() || !isConnected}
+              size="sm"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
           </div>
-        )}
-      </div>
+        </TabsContent>
+
+        <TabsContent value="users" className="flex-1 mt-3 mx-3">
+          <div className="space-y-3">
+            {/* Invite Button */}
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={inviteCollaborator}
+            >
+              <UserPlus className="w-4 h-4 mr-2" />
+              Invite Collaborators
+            </Button>
+
+            {/* Collaborators List */}
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium text-muted-foreground">
+                Active Users ({collaborators.filter(c => c.isOnline).length})
+              </h4>
+              
+              {collaborators.map((collaborator) => (
+                <Card key={collaborator.userId} className="p-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="relative">
+                      <Avatar className="w-8 h-8">
+                        <AvatarFallback 
+                          className="text-xs"
+                          style={{ backgroundColor: collaborator.userColor + '20', color: collaborator.userColor }}
+                        >
+                          {getInitials(collaborator.userName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div 
+                        className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-background ${
+                          collaborator.isOnline ? 'bg-green-500' : 'bg-gray-400'
+                        }`}
+                      />
+                    </div>
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm font-medium truncate">
+                          {collaborator.userName}
+                        </span>
+                        {collaborator.userId === user?.id && (
+                          <Badge variant="secondary" className="text-xs">You</Badge>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                        <div 
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: collaborator.userColor }}
+                        />
+                        <span>
+                          {collaborator.isOnline ? 'Online' : 'Offline'}
+                        </span>
+                        {collaborator.cursor && (
+                          <span>• Line {collaborator.cursor.line}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+
+            {/* Collaboration Features */}
+            <div className="mt-6 space-y-2">
+              <h4 className="text-sm font-medium text-muted-foreground">Quick Actions</h4>
+              
+              <Button variant="outline" size="sm" className="w-full justify-start">
+                <MessageSquare className="w-4 h-4 mr-2" />
+                Share Screen
+              </Button>
+              
+              <Button variant="outline" size="sm" className="w-full justify-start">
+                <Settings className="w-4 h-4 mr-2" />
+                Collaboration Settings
+              </Button>
+            </div>
+
+            {/* Connection Status */}
+            <Card className="mt-4">
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">Connection Status</span>
+                  <Badge variant={isConnected ? "default" : "destructive"}>
+                    {isConnected ? 'Connected' : 'Disconnected'}
+                  </Badge>
+                </div>
+                
+                <div className="flex items-center justify-between text-xs mt-2">
+                  <span className="text-muted-foreground">Session ID</span>
+                  <code className="text-xs bg-muted px-1 rounded">
+                    {projectId.slice(0, 8)}...
+                  </code>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
-}
+};
+
+export default CollaborationPanel;

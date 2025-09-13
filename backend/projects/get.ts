@@ -3,38 +3,36 @@ import { getAuthData } from "~encore/auth";
 import { projectsDB } from "./db";
 import { Project } from "./types";
 
-interface GetProjectRequest {
+export interface GetProjectParams {
   id: string;
 }
 
-// Gets a project by ID.
-export const get = api<GetProjectRequest, Project>(
+// Gets a specific project by ID.
+export const get = api<GetProjectParams, Project>(
   { auth: true, expose: true, method: "GET", path: "/projects/:id" },
-  async (req) => {
+  async ({ id }) => {
     const auth = getAuthData()!;
-    
+
     const project = await projectsDB.queryRow<Project>`
       SELECT 
         id,
         name,
         description,
-        template,
+        template_type as "templateType",
+        template_name as "templateName",
         user_id as "userId",
+        status,
+        git_url as "gitUrl",
+        deploy_url as "deployUrl",
+        environment_id as "environmentId", 
         created_at as "createdAt",
-        updated_at as "updatedAt",
-        settings,
-        status
+        updated_at as "updatedAt"
       FROM projects 
-      WHERE id = ${req.id} AND (
-        user_id = ${auth.userID} OR id IN (
-          SELECT project_id FROM project_collaborators 
-          WHERE user_id = ${auth.userID} AND accepted_at IS NOT NULL
-        )
-      )
+      WHERE id = ${id} AND user_id = ${auth.userID}
     `;
 
     if (!project) {
-      throw APIError.notFound("project not found");
+      throw APIError.notFound("Project not found");
     }
 
     return project;

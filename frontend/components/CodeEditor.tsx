@@ -1,224 +1,239 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import * as monaco from 'monaco-editor';
-import { Save, RotateCcw } from 'lucide-react';
+import { Save, Download, Copy, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useBackend } from '../hooks/useBackend';
-import { useToast } from '@/components/ui/use-toast';
+import { editorConfig } from '../config';
+
+interface File {
+  id: string;
+  name: string;
+  path: string;
+  content?: string;
+  isDirectory: boolean;
+}
 
 interface CodeEditorProps {
-  projectId: string;
-  filePath: string;
-  className?: string;
+  file: File;
+  onChange: (content: string) => void;
+  onSave: () => void;
 }
 
-export default function CodeEditor({ projectId, filePath, className }: CodeEditorProps) {
-  const editorRef = useRef<HTMLDivElement>(null);
-  const [editor, setEditor] = useState<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [originalContent, setOriginalContent] = useState('');
-  const backend = useBackend();
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
+const CodeEditor: React.FC<CodeEditorProps> = ({ file, onChange, onSave }) => {
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const [content, setContent] = useState(file.content || '');
+  const [hasChanges, setHasChanges] = useState(false);
 
-  const { data: fileData, isLoading } = useQuery({
-    queryKey: ['file', projectId, filePath],
-    queryFn: async () => {
-      try {
-        return await backend.files.get({ projectId, path: filePath });
-      } catch (error) {
-        console.error('Failed to fetch file:', error);
-        return null;
-      }
-    },
-    enabled: !!filePath,
-  });
-
-  const saveFileMutation = useMutation({
-    mutationFn: async (content: string) => {
-      return await backend.files.save({
-        projectId,
-        path: filePath,
-        content,
-      });
-    },
-    onSuccess: () => {
-      setHasUnsavedChanges(false);
-      setOriginalContent(editor?.getValue() || '');
-      queryClient.invalidateQueries({ queryKey: ['file', projectId, filePath] });
-      toast({
-        title: 'File saved',
-        description: `${filePath} has been saved successfully.`,
-      });
-    },
-    onError: (error) => {
-      console.error('Failed to save file:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to save file',
-        variant: 'destructive',
-      });
-    },
-  });
-
-  // Initialize Monaco Editor
   useEffect(() => {
-    if (!editorRef.current) return;
+    setContent(file.content || '');
+    setHasChanges(false);
+  }, [file.id, file.content]);
 
-    const editorInstance = monaco.editor.create(editorRef.current, {
-      value: '',
-      language: getLanguageFromPath(filePath),
-      theme: 'vs-dark',
-      automaticLayout: true,
-      fontSize: 14,
-      lineNumbers: 'on',
-      renderWhitespace: 'selection',
-      scrollBeyondLastLine: false,
-      minimap: { enabled: false },
-      folding: true,
-      wordWrap: 'on',
-      tabSize: 2,
-      insertSpaces: true,
-      formatOnPaste: true,
-      formatOnType: true,
-    });
-
-    // Track changes
-    editorInstance.onDidChangeModelContent(() => {
-      const currentContent = editorInstance.getValue();
-      setHasUnsavedChanges(currentContent !== originalContent);
-    });
-
-    // Keyboard shortcuts
-    editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      handleSave();
-    });
-
-    setEditor(editorInstance);
-
-    return () => {
-      editorInstance.dispose();
-    };
-  }, [filePath]);
-
-  // Update editor content when file data changes
-  useEffect(() => {
-    if (editor && fileData) {
-      const content = fileData.content || '';
-      editor.setValue(content);
-      setOriginalContent(content);
-      setHasUnsavedChanges(false);
-      
-      // Update language
-      const model = editor.getModel();
-      if (model) {
-        monaco.editor.setModelLanguage(model, getLanguageFromPath(filePath));
-      }
-    }
-  }, [editor, fileData, filePath]);
+  const handleContentChange = (newContent: string) => {
+    setContent(newContent);
+    setHasChanges(newContent !== (file.content || ''));
+    onChange(newContent);
+  };
 
   const handleSave = () => {
-    if (!editor || !hasUnsavedChanges) return;
-    const content = editor.getValue();
-    saveFileMutation.mutate(content);
+    onSave();
+    setHasChanges(false);
   };
 
-  const handleRevert = () => {
-    if (!editor || !hasUnsavedChanges) return;
-    editor.setValue(originalContent);
-    setHasUnsavedChanges(false);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    }
   };
 
-  const getLanguageFromPath = (path: string): string => {
-    const ext = path.split('.').pop()?.toLowerCase();
-    const languageMap: Record<string, string> = {
-      'ts': 'typescript',
-      'tsx': 'typescript',
-      'js': 'javascript',
-      'jsx': 'javascript',
-      'json': 'json',
-      'html': 'html',
-      'css': 'css',
-      'scss': 'scss',
-      'sass': 'sass',
-      'less': 'less',
-      'md': 'markdown',
-      'py': 'python',
-      'java': 'java',
-      'go': 'go',
-      'rs': 'rust',
-      'cpp': 'cpp',
-      'c': 'c',
-      'cs': 'csharp',
-      'php': 'php',
-      'rb': 'ruby',
-      'sql': 'sql',
-      'xml': 'xml',
-      'yaml': 'yaml',
-      'yml': 'yaml',
-      'toml': 'toml',
-      'ini': 'ini',
+  const getLanguage = () => {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    switch (extension) {
+      case 'js': return 'JavaScript';
+      case 'ts': return 'TypeScript';
+      case 'jsx': return 'React (JSX)';
+      case 'tsx': return 'React (TSX)';
+      case 'py': return 'Python';
+      case 'java': return 'Java';
+      case 'cpp': case 'c': return 'C/C++';
+      case 'go': return 'Go';
+      case 'rs': return 'Rust';
+      case 'html': return 'HTML';
+      case 'css': return 'CSS';
+      case 'scss': case 'sass': return 'SCSS';
+      case 'json': return 'JSON';
+      case 'md': return 'Markdown';
+      case 'xml': return 'XML';
+      case 'yaml': case 'yml': return 'YAML';
+      default: return 'Text';
+    }
+  };
+
+  const getFileSize = () => {
+    const bytes = new Blob([content]).size;
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const getLineCount = () => {
+    return content.split('\n').length;
+  };
+
+  const getCursorPosition = () => {
+    if (!editorRef.current) return { line: 1, column: 1 };
+    
+    const textArea = editorRef.current;
+    const cursorPos = textArea.selectionStart;
+    const textBeforeCursor = content.substring(0, cursorPos);
+    const lines = textBeforeCursor.split('\n');
+    
+    return {
+      line: lines.length,
+      column: lines[lines.length - 1].length + 1
     };
-    return languageMap[ext || ''] || 'plaintext';
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full bg-gray-900">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
+  const [cursorPos, setCursorPos] = useState(getCursorPosition());
 
-  if (!filePath) {
-    return (
-      <div className="flex items-center justify-center h-full bg-gray-900 text-gray-400">
-        <div className="text-center">
-          <div className="text-2xl mb-2">📝</div>
-          <p>Select a file to start editing</p>
-        </div>
-      </div>
-    );
-  }
+  const handleSelectionChange = () => {
+    setCursorPos(getCursorPosition());
+  };
 
+  // This is a basic textarea implementation
+  // In a production app, you would use Monaco Editor or CodeMirror
   return (
-    <div className={`flex flex-col h-full ${className}`}>
+    <div className="h-full flex flex-col bg-background">
       {/* Editor Header */}
-      <div className="flex items-center justify-between bg-gray-800 px-4 py-2 border-b border-gray-700">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-300">{filePath}</span>
-          {hasUnsavedChanges && (
+      <div className="border-b bg-card/50 px-4 py-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2">
+              <span className="font-medium text-sm">{file.name}</span>
+              {hasChanges && (
+                <Badge variant="secondary" className="text-xs">
+                  Modified
+                </Badge>
+              )}
+            </div>
             <Badge variant="outline" className="text-xs">
-              Unsaved
+              {getLanguage()}
             </Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleRevert}
-            disabled={!hasUnsavedChanges}
-            className="text-xs"
-          >
-            <RotateCcw className="w-3 h-3 mr-1" />
-            Revert
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!hasUnsavedChanges || saveFileMutation.isPending}
-            className="text-xs"
-          >
-            <Save className="w-3 h-3 mr-1" />
-            {saveFileMutation.isPending ? 'Saving...' : 'Save'}
-          </Button>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigator.clipboard.writeText(content)}
+            >
+              <Copy className="w-4 h-4 mr-1" />
+              Copy
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = file.name;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download className="w-4 h-4 mr-1" />
+              Download
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setContent(file.content || '');
+                setHasChanges(false);
+              }}
+              disabled={!hasChanges}
+            >
+              <RotateCcw className="w-4 h-4 mr-1" />
+              Revert
+            </Button>
+            
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={!hasChanges}
+            >
+              <Save className="w-4 h-4 mr-1" />
+              Save
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Monaco Editor */}
-      <div ref={editorRef} className="flex-1" />
+      {/* Editor Content */}
+      <div className="flex-1 relative">
+        <textarea
+          ref={editorRef}
+          value={content}
+          onChange={(e) => handleContentChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onMouseUp={handleSelectionChange}
+          onKeyUp={handleSelectionChange}
+          className="w-full h-full p-4 bg-transparent border-0 outline-none resize-none font-mono text-sm leading-relaxed"
+          style={{
+            fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
+            fontSize: '14px',
+            lineHeight: '1.6',
+            tabSize: 2,
+          }}
+          placeholder="Start typing..."
+          spellCheck={false}
+        />
+
+        {/* Line numbers overlay (simplified) */}
+        <div className="absolute left-0 top-0 w-12 h-full bg-muted/20 border-r pointer-events-none">
+          <div className="p-4 font-mono text-xs text-muted-foreground leading-relaxed">
+            {Array.from({ length: getLineCount() }, (_, i) => (
+              <div key={i + 1} className="text-right">
+                {i + 1}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Adjust textarea to account for line numbers */}
+        <style>
+          {`
+            .CodeEditor textarea {
+              padding-left: 64px !important;
+            }
+          `}
+        </style>
+      </div>
+
+      {/* Status Bar */}
+      <div className="border-t bg-card/50 px-4 py-1">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <div className="flex items-center space-x-4">
+            <span>Line {cursorPos.line}, Column {cursorPos.column}</span>
+            <span>{getLineCount()} lines</span>
+            <span>{getFileSize()}</span>
+          </div>
+          
+          <div className="flex items-center space-x-4">
+            <span>UTF-8</span>
+            <span>{getLanguage()}</span>
+            {hasChanges && <span className="text-orange-500">●</span>}
+          </div>
+        </div>
+      </div>
     </div>
   );
-}
+};
+
+export default CodeEditor;

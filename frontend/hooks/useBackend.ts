@@ -5,7 +5,9 @@ import backend from "~backend/client";
 export function useBackend() {
   const { getToken, isSignedIn } = useAuth();
   
-  if (!isSignedIn) return backend;
+  if (!isSignedIn) {
+    return backend;
+  }
   
   return backend.with({
     auth: async () => {
