@@ -307,4 +307,247 @@ const Terminal: React.FC<TerminalProps> = ({ projectId }) => {
   );
 };
 
-export default Terminal;
+export default Terminal;import { useEffect, useRef, useState } from "react";
+import { Terminal as XTerm } from "xterm";
+import { FitAddon } from "xterm-addon-fit";
+import { WebLinksAddon } from "xterm-addon-web-links";
+import { Button } from "@/components/ui/button";
+import { Trash2, Play, Square } from "lucide-react";
+import { useBackend } from "../hooks/useBackend";
+import { useToast } from "@/components/ui/use-toast";
+import "xterm/css/xterm.css";
+
+interface TerminalProps {
+  projectId: string;
+}
+
+export function Terminal({ projectId }: TerminalProps) {
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<XTerm | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [running, setRunning] = useState(false);
+  const backend = useBackend();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (!terminalRef.current || mounted) return;
+
+    // Create terminal instance
+    const xterm = new XTerm({
+      theme: {
+        background: "hsl(var(--card))",
+        foreground: "hsl(var(--foreground))",
+        cursor: "hsl(var(--primary))",
+        selection: "hsl(var(--muted))",
+        black: "hsl(var(--muted-foreground))",
+        red: "#ef4444",
+        green: "#22c55e",
+        yellow: "#eab308",
+        blue: "#3b82f6",
+        magenta: "#a855f7",
+        cyan: "#06b6d4",
+        white: "hsl(var(--foreground))",
+        brightBlack: "hsl(var(--muted-foreground))",
+        brightRed: "#f87171",
+        brightGreen: "#4ade80",
+        brightYellow: "#facc15",
+        brightBlue: "#60a5fa",
+        brightMagenta: "#c084fc",
+        brightCyan: "#22d3ee",
+        brightWhite: "hsl(var(--foreground))"
+      },
+      fontSize: 14,
+      fontFamily: '"Fira Code", "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace',
+      cursorBlink: true,
+      cursorStyle: "block",
+      scrollback: 1000,
+      tabStopWidth: 4
+    });
+
+    // Create fit addon
+    const fitAddon = new FitAddon();
+    xterm.loadAddon(fitAddon);
+    xterm.loadAddon(new WebLinksAddon());
+
+    // Open terminal
+    xterm.open(terminalRef.current);
+    fitAddon.fit();
+
+    // Store references
+    xtermRef.current = xterm;
+    fitAddonRef.current = fitAddon;
+
+    // Welcome message
+    xterm.writeln("\x1b[1;32m┌─────────────────────────────────────────┐\x1b[0m");
+    xterm.writeln("\x1b[1;32m│           Myco Terminal v1.0            │\x1b[0m");
+    xterm.writeln("\x1b[1;32m└─────────────────────────────────────────┘\x1b[0m");
+    xterm.writeln("");
+    xterm.writeln("Type commands or run your code using the Run button.");
+    xterm.writeln("");
+    xterm.write("$ ");
+
+    // Handle input
+    let currentLine = "";
+    
+    xterm.onData((data) => {
+      const char = data.charCodeAt(0);
+      
+      if (char === 13) { // Enter
+        xterm.writeln("");
+        if (currentLine.trim()) {
+          executeCommand(currentLine.trim());
+        }
+        currentLine = "";
+        xterm.write("$ ");
+      } else if (char === 127) { // Backspace
+        if (currentLine.length > 0) {
+          currentLine = currentLine.slice(0, -1);
+          xterm.write("\b \b");
+        }
+      } else if (char >= 32) { // Printable characters
+        currentLine += data;
+        xterm.write(data);
+      }
+    });
+
+    const executeCommand = async (command: string) => {
+      try {
+        setRunning(true);
+        const response = await backend.execution.executeCommand({
+          projectId,
+          command
+        });
+        
+        if (response.output) {
+          xterm.writeln(response.output);
+        }
+        if (response.error) {
+          xterm.writeln(`\x1b[31m${response.error}\x1b[0m`);
+        }
+      } catch (err) {
+        console.error("Command execution failed:", err);
+        xterm.writeln(`\x1b[31mError: Failed to execute command\x1b[0m`);
+      } finally {
+        setRunning(false);
+      }
+    };
+
+    // Handle resize
+    const handleResize = () => {
+      if (fitAddonRef.current) {
+        fitAddonRef.current.fit();
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    setMounted(true);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (xtermRef.current) {
+        xtermRef.current.dispose();
+      }
+    };
+  }, [projectId, backend, mounted]);
+
+  const clearTerminal = () => {
+    if (xtermRef.current) {
+      xtermRef.current.clear();
+      xtermRef.current.write("$ ");
+    }
+  };
+
+  const runProject = async () => {
+    if (!xtermRef.current) return;
+
+    try {
+      setRunning(true);
+      xtermRef.current.writeln("Running project...");
+      
+      const response = await backend.execution.run({ projectId });
+      
+      if (response.output) {
+        xtermRef.current.writeln(response.output);
+      }
+      if (response.error) {
+        xtermRef.current.writeln(`\x1b[31m${response.error}\x1b[0m`);
+      }
+    } catch (err) {
+      console.error("Failed to run project:", err);
+      xtermRef.current.writeln(`\x1b[31mError: Failed to run project\x1b[0m`);
+      toast({
+        title: "Error",
+        description: "Failed to run project.",
+        variant: "destructive"
+      });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const stopExecution = async () => {
+    try {
+      await backend.execution.stop({ projectId });
+      if (xtermRef.current) {
+        xtermRef.current.writeln("\x1b[33mExecution stopped\x1b[0m");
+      }
+      setRunning(false);
+    } catch (err) {
+      console.error("Failed to stop execution:", err);
+      toast({
+        title: "Error",
+        description: "Failed to stop execution.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-card">
+      {/* Terminal Header */}
+      <div className="flex items-center justify-between p-3 border-b">
+        <h3 className="text-sm font-semibold">Terminal</h3>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={runProject}
+            disabled={running}
+            className="gap-2"
+          >
+            <Play className="h-4 w-4" />
+            Run
+          </Button>
+          
+          {running && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={stopExecution}
+              className="gap-2"
+            >
+              <Square className="h-4 w-4" />
+              Stop
+            </Button>
+          )}
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearTerminal}
+            className="gap-2"
+          >
+            <Trash2 className="h-4 w-4" />
+            Clear
+          </Button>
+        </div>
+      </div>
+
+      {/* Terminal Content */}
+      <div className="flex-1 p-2">
+        <div ref={terminalRef} className="h-full" />
+      </div>
+    </div>
+  );
+}

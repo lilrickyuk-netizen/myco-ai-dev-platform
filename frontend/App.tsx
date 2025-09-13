@@ -4,7 +4,7 @@ import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/cle
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
 import { clerkPublishableKey } from './config';
-import Dashboard from './pages/Dashboard';
+import Dashboard from './components/Dashboard';
 import IDEPage from './pages/IDEPage';
 import ProjectSettings from './pages/ProjectSettings';
 
@@ -13,6 +13,7 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000, // 5 minutes
     },
   },
 });

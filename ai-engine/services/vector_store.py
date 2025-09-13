@@ -1,500 +1,597 @@
 """
-Vector Store Manager - Handles embeddings and vector search for AI applications
+Vector Store Manager - Handles vector embeddings and semantic search
 """
 
 import asyncio
-import json
 import logging
-import numpy as np
-from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-
-# Vector store implementations
-try:
-    import pinecone
-except ImportError:
-    pinecone = None
+import os
+import time
+from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime
+import hashlib
+import json
 
 try:
     import weaviate
+    from weaviate.client import Client as WeaviateClient
+    WEAVIATE_AVAILABLE = True
 except ImportError:
     weaviate = None
+    WeaviateClient = None
+    WEAVIATE_AVAILABLE = False
 
-try:
-    import chromadb
-except ImportError:
-    chromadb = None
-
-# Embedding providers
 try:
     import openai
+    OPENAI_AVAILABLE = True
 except ImportError:
     openai = None
+    OPENAI_AVAILABLE = False
 
 try:
-    from sentence_transformers import SentenceTransformer
+    import numpy as np
+    NUMPY_AVAILABLE = True
 except ImportError:
-    SentenceTransformer = None
+    np = None
+    NUMPY_AVAILABLE = False
 
-from ..core.config import settings
+from .cache_manager import cache_manager
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class Document:
-    id: str
-    content: str
-    metadata: Dict[str, Any]
-    embedding: Optional[List[float]] = None
-
-@dataclass
-class SearchResult:
-    document: Document
-    score: float
-    rank: int
-
-class EmbeddingProvider(ABC):
-    """Abstract base class for embedding providers"""
-    
-    @abstractmethod
-    async def embed_text(self, text: str) -> List[float]:
-        """Generate embeddings for text"""
-        pass
-    
-    @abstractmethod
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts"""
-        pass
-
-class OpenAIEmbeddingProvider(EmbeddingProvider):
-    """OpenAI embedding provider"""
-    
-    def __init__(self, api_key: str, model: str = "text-embedding-ada-002"):
-        self.client = openai.AsyncOpenAI(api_key=api_key)
-        self.model = model
-    
-    async def embed_text(self, text: str) -> List[float]:
-        """Generate embedding for single text"""
-        response = await self.client.embeddings.create(
-            model=self.model,
-            input=text
-        )
-        return response.data[0].embedding
-    
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts"""
-        response = await self.client.embeddings.create(
-            model=self.model,
-            input=texts
-        )
-        return [data.embedding for data in response.data]
-
-class SentenceTransformerProvider(EmbeddingProvider):
-    """Local sentence transformer embedding provider"""
-    
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        if SentenceTransformer is None:
-            raise ImportError("sentence-transformers not installed")
-        
-        self.model = SentenceTransformer(model_name)
-    
-    async def embed_text(self, text: str) -> List[float]:
-        """Generate embedding for single text"""
-        # Run in thread pool since sentence-transformers is CPU-bound
-        loop = asyncio.get_event_loop()
-        embedding = await loop.run_in_executor(
-            None, 
-            lambda: self.model.encode([text])[0]
-        )
-        return embedding.tolist()
-    
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple texts"""
-        loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(
-            None,
-            lambda: self.model.encode(texts)
-        )
-        return embeddings.tolist()
-
-class VectorStore(ABC):
-    """Abstract base class for vector stores"""
-    
-    @abstractmethod
-    async def add_documents(self, documents: List[Document]) -> None:
-        """Add documents to the vector store"""
-        pass
-    
-    @abstractmethod
-    async def search(
-        self, 
-        query_embedding: List[float], 
-        limit: int = 10,
-        filter_metadata: Optional[Dict[str, Any]] = None
-    ) -> List[SearchResult]:
-        """Search for similar documents"""
-        pass
-    
-    @abstractmethod
-    async def delete_documents(self, document_ids: List[str]) -> None:
-        """Delete documents by IDs"""
-        pass
-    
-    @abstractmethod
-    async def health_check(self) -> Dict[str, Any]:
-        """Check vector store health"""
-        pass
-
-class PineconeVectorStore(VectorStore):
-    """Pinecone vector store implementation"""
-    
-    def __init__(self, api_key: str, environment: str, index_name: str):
-        if pinecone is None:
-            raise ImportError("pinecone-client not installed")
-        
-        pinecone.init(api_key=api_key, environment=environment)
-        self.index = pinecone.Index(index_name)
-        self.index_name = index_name
-    
-    async def add_documents(self, documents: List[Document]) -> None:
-        """Add documents to Pinecone"""
-        vectors = []
-        for doc in documents:
-            if doc.embedding is None:
-                raise ValueError(f"Document {doc.id} has no embedding")
-            
-            vectors.append((
-                doc.id,
-                doc.embedding,
-                {
-                    "content": doc.content,
-                    **doc.metadata
-                }
-            ))
-        
-        # Pinecone upsert is synchronous, so we run it in a thread
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: self.index.upsert(vectors)
-        )
-    
-    async def search(
-        self,
-        query_embedding: List[float],
-        limit: int = 10,
-        filter_metadata: Optional[Dict[str, Any]] = None
-    ) -> List[SearchResult]:
-        """Search Pinecone for similar vectors"""
-        
-        query_params = {
-            "vector": query_embedding,
-            "top_k": limit,
-            "include_metadata": True
-        }
-        
-        if filter_metadata:
-            query_params["filter"] = filter_metadata
-        
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.index.query(**query_params)
-        )
-        
-        results = []
-        for i, match in enumerate(response.matches):
-            doc = Document(
-                id=match.id,
-                content=match.metadata.get("content", ""),
-                metadata={k: v for k, v in match.metadata.items() if k != "content"},
-                embedding=None  # We don't need to return embeddings in search results
-            )
-            
-            results.append(SearchResult(
-                document=doc,
-                score=match.score,
-                rank=i + 1
-            ))
-        
-        return results
-    
-    async def delete_documents(self, document_ids: List[str]) -> None:
-        """Delete documents from Pinecone"""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: self.index.delete(ids=document_ids)
-        )
-    
-    async def health_check(self) -> Dict[str, Any]:
-        """Check Pinecone health"""
-        try:
-            loop = asyncio.get_event_loop()
-            stats = await loop.run_in_executor(
-                None,
-                lambda: self.index.describe_index_stats()
-            )
-            
-            return {
-                "status": "healthy",
-                "index_name": self.index_name,
-                "total_vector_count": stats.total_vector_count,
-                "dimension": stats.dimension
-            }
-        except Exception as e:
-            return {
-                "status": "unhealthy",
-                "error": str(e)
-            }
-
-class ChromaVectorStore(VectorStore):
-    """ChromaDB vector store implementation"""
-    
-    def __init__(self, persist_directory: str, collection_name: str = "myco_vectors"):
-        if chromadb is None:
-            raise ImportError("chromadb not installed")
-        
-        self.client = chromadb.PersistentClient(path=persist_directory)
-        self.collection = self.client.get_or_create_collection(name=collection_name)
-        self.collection_name = collection_name
-    
-    async def add_documents(self, documents: List[Document]) -> None:
-        """Add documents to ChromaDB"""
-        ids = [doc.id for doc in documents]
-        embeddings = [doc.embedding for doc in documents]
-        metadatas = [doc.metadata for doc in documents]
-        documents_content = [doc.content for doc in documents]
-        
-        # ChromaDB operations are synchronous
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: self.collection.add(
-                ids=ids,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                documents=documents_content
-            )
-        )
-    
-    async def search(
-        self,
-        query_embedding: List[float],
-        limit: int = 10,
-        filter_metadata: Optional[Dict[str, Any]] = None
-    ) -> List[SearchResult]:
-        """Search ChromaDB for similar vectors"""
-        
-        query_params = {
-            "query_embeddings": [query_embedding],
-            "n_results": limit,
-            "include": ["documents", "metadatas", "distances"]
-        }
-        
-        if filter_metadata:
-            query_params["where"] = filter_metadata
-        
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.collection.query(**query_params)
-        )
-        
-        results = []
-        for i, (doc_id, document, metadata, distance) in enumerate(zip(
-            response["ids"][0],
-            response["documents"][0],
-            response["metadatas"][0],
-            response["distances"][0]
-        )):
-            doc = Document(
-                id=doc_id,
-                content=document,
-                metadata=metadata or {},
-                embedding=None
-            )
-            
-            # Convert distance to similarity score (ChromaDB returns distances)
-            score = 1.0 / (1.0 + distance)
-            
-            results.append(SearchResult(
-                document=doc,
-                score=score,
-                rank=i + 1
-            ))
-        
-        return results
-    
-    async def delete_documents(self, document_ids: List[str]) -> None:
-        """Delete documents from ChromaDB"""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: self.collection.delete(ids=document_ids)
-        )
-    
-    async def health_check(self) -> Dict[str, Any]:
-        """Check ChromaDB health"""
-        try:
-            loop = asyncio.get_event_loop()
-            count = await loop.run_in_executor(
-                None,
-                lambda: self.collection.count()
-            )
-            
-            return {
-                "status": "healthy",
-                "collection_name": self.collection_name,
-                "document_count": count
-            }
-        except Exception as e:
-            return {
-                "status": "unhealthy",
-                "error": str(e)
-            }
-
 class VectorStoreManager:
-    """Manages vector stores and embeddings"""
-    
     def __init__(self):
-        self.embedding_provider: Optional[EmbeddingProvider] = None
-        self.vector_store: Optional[VectorStore] = None
-        self._initialize_providers()
-    
-    def _initialize_providers(self):
-        """Initialize embedding and vector store providers"""
+        self.logger = logging.getLogger(__name__)
+        self.weaviate_client: Optional[WeaviateClient] = None
+        self.embedding_client = None
+        self.schema_created = False
+        self.embedding_cache = {}
+        self.default_class_name = "CodeDocument"
         
-        # Initialize embedding provider
-        if settings.OPENAI_API_KEY:
-            self.embedding_provider = OpenAIEmbeddingProvider(settings.OPENAI_API_KEY)
-            logger.info("Initialized OpenAI embedding provider")
-        elif SentenceTransformer:
-            self.embedding_provider = SentenceTransformerProvider()
-            logger.info("Initialized SentenceTransformer embedding provider")
-        else:
-            logger.warning("No embedding provider available")
-        
-        # Initialize vector store
-        if settings.PINECONE_API_KEY and settings.PINECONE_ENVIRONMENT:
-            try:
-                self.vector_store = PineconeVectorStore(
-                    api_key=settings.PINECONE_API_KEY,
-                    environment=settings.PINECONE_ENVIRONMENT,
-                    index_name=settings.PINECONE_INDEX_NAME
-                )
-                logger.info("Initialized Pinecone vector store")
-            except Exception as e:
-                logger.warning(f"Failed to initialize Pinecone: {e}")
-        
-        if not self.vector_store and chromadb:
-            try:
-                self.vector_store = ChromaVectorStore(
-                    persist_directory=settings.CHROMA_PERSIST_DIRECTORY
-                )
-                logger.info("Initialized ChromaDB vector store")
-            except Exception as e:
-                logger.warning(f"Failed to initialize ChromaDB: {e}")
-        
-        if not self.vector_store:
-            logger.warning("No vector store initialized")
+        # Fallback in-memory vector store for when Weaviate is not available
+        self.memory_store: Dict[str, Dict[str, Any]] = {}
+        self.memory_embeddings: Dict[str, List[float]] = {}
     
     async def initialize(self):
         """Initialize the vector store manager"""
-        logger.info("Vector store manager initialized")
+        self.logger.info("Initializing Vector Store Manager...")
+        
+        # Initialize embedding provider
+        await self._initialize_embedding_provider()
+        
+        # Try to connect to Weaviate
+        if WEAVIATE_AVAILABLE:
+            weaviate_url = os.getenv("WEAVIATE_URL", "http://localhost:8080")
+            try:
+                self.weaviate_client = weaviate.Client(url=weaviate_url)
+                
+                # Test connection
+                result = self.weaviate_client.schema.get()
+                self.logger.info(f"Connected to Weaviate at {weaviate_url}")
+                
+                # Create schema if needed
+                await self._ensure_schema()
+                
+            except Exception as e:
+                self.logger.warning(f"Could not connect to Weaviate: {e}. Using memory store.")
+                self.weaviate_client = None
+        else:
+            self.logger.warning("Weaviate not available. Using memory store only.")
+        
+        self.logger.info("Vector Store Manager initialized successfully")
     
     async def cleanup(self):
         """Cleanup resources"""
-        logger.info("Vector store manager cleaned up")
+        self.logger.info("Cleaning up Vector Store Manager...")
+        
+        # Clear memory stores
+        self.memory_store.clear()
+        self.memory_embeddings.clear()
+        self.embedding_cache.clear()
+        
+        self.logger.info("Vector Store Manager cleanup complete")
     
-    async def add_documents(
-        self,
-        texts: List[str],
-        metadatas: List[Dict[str, Any]],
-        document_ids: Optional[List[str]] = None
-    ) -> List[str]:
-        """Add documents with automatic embedding generation"""
+    async def _initialize_embedding_provider(self):
+        """Initialize the embedding provider"""
+        # Try OpenAI first
+        if OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
+            self.embedding_client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            self.embedding_model = "text-embedding-3-small"
+            self.embedding_dimension = 1536
+            self.logger.info("Using OpenAI embeddings")
+        else:
+            # Fallback to simple TF-IDF-like embeddings
+            self.embedding_client = None
+            self.embedding_model = "simple_tfidf"
+            self.embedding_dimension = 384
+            self.logger.warning("No embedding provider available. Using simple embeddings.")
+    
+    async def _ensure_schema(self):
+        """Ensure the Weaviate schema exists"""
+        if not self.weaviate_client or self.schema_created:
+            return
         
-        if not self.embedding_provider:
-            raise RuntimeError("No embedding provider available")
-        
-        if not self.vector_store:
-            raise RuntimeError("No vector store available")
-        
-        # Generate embeddings
-        embeddings = await self.embedding_provider.embed_batch(texts)
-        
-        # Create documents
-        documents = []
-        for i, (text, metadata, embedding) in enumerate(zip(texts, metadatas, embeddings)):
-            doc_id = document_ids[i] if document_ids else f"doc_{i}_{hash(text) % 1000000}"
+        try:
+            # Check if class already exists
+            schema = self.weaviate_client.schema.get()
+            existing_classes = [cls["class"] for cls in schema.get("classes", [])]
             
-            documents.append(Document(
-                id=doc_id,
-                content=text,
-                metadata=metadata,
-                embedding=embedding
-            ))
+            if self.default_class_name not in existing_classes:
+                # Create the schema
+                class_obj = {
+                    "class": self.default_class_name,
+                    "description": "Code documents and text for semantic search",
+                    "vectorizer": "none",  # We'll provide our own vectors
+                    "properties": [
+                        {
+                            "name": "content",
+                            "dataType": ["text"],
+                            "description": "The document content"
+                        },
+                        {
+                            "name": "document_type",
+                            "dataType": ["string"],
+                            "description": "Type of document (code, documentation, etc.)"
+                        },
+                        {
+                            "name": "language",
+                            "dataType": ["string"],
+                            "description": "Programming language or content language"
+                        },
+                        {
+                            "name": "file_path",
+                            "dataType": ["string"],
+                            "description": "File path or identifier"
+                        },
+                        {
+                            "name": "project_id",
+                            "dataType": ["string"],
+                            "description": "Project identifier"
+                        },
+                        {
+                            "name": "metadata",
+                            "dataType": ["object"],
+                            "description": "Additional metadata"
+                        },
+                        {
+                            "name": "timestamp",
+                            "dataType": ["date"],
+                            "description": "Creation timestamp"
+                        }
+                    ]
+                }
+                
+                self.weaviate_client.schema.create_class(class_obj)
+                self.logger.info(f"Created Weaviate class: {self.default_class_name}")
+            
+            self.schema_created = True
         
-        # Add to vector store
-        await self.vector_store.add_documents(documents)
-        
-        return [doc.id for doc in documents]
+        except Exception as e:
+            self.logger.error(f"Error creating Weaviate schema: {e}")
     
-    async def search(
+    async def _generate_embedding(self, text: str) -> List[float]:
+        """Generate embedding for text"""
+        # Check cache first
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+        if text_hash in self.embedding_cache:
+            return self.embedding_cache[text_hash]
+        
+        try:
+            if self.embedding_client:
+                # Use OpenAI embeddings
+                response = await self.embedding_client.embeddings.create(
+                    model=self.embedding_model,
+                    input=text
+                )
+                embedding = response.data[0].embedding
+            else:
+                # Fallback to simple embeddings
+                embedding = self._simple_embedding(text)
+            
+            # Cache the embedding
+            self.embedding_cache[text_hash] = embedding
+            
+            return embedding
+        
+        except Exception as e:
+            self.logger.error(f"Error generating embedding: {e}")
+            # Return a zero vector as fallback
+            return [0.0] * self.embedding_dimension
+    
+    def _simple_embedding(self, text: str) -> List[float]:
+        """Generate a simple TF-IDF-like embedding"""
+        # This is a very basic implementation for fallback
+        words = text.lower().split()
+        
+        # Create a simple vocabulary-based embedding
+        vocab_size = 1000
+        embedding = [0.0] * self.embedding_dimension
+        
+        for i, word in enumerate(words):
+            if i >= len(embedding):
+                break
+            
+            # Simple hash-based position
+            word_hash = hash(word) % len(embedding)
+            embedding[word_hash] += 1.0 / len(words)
+        
+        # Normalize
+        norm = sum(x * x for x in embedding) ** 0.5
+        if norm > 0:
+            embedding = [x / norm for x in embedding]
+        
+        return embedding
+    
+    async def add_document(
+        self,
+        content: str,
+        document_type: str = "code",
+        language: str = "unknown",
+        file_path: str = "",
+        project_id: str = "",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Add a document to the vector store"""
+        try:
+            # Generate embedding
+            embedding = await self._generate_embedding(content)
+            
+            # Create document data
+            doc_data = {
+                "content": content,
+                "document_type": document_type,
+                "language": language,
+                "file_path": file_path,
+                "project_id": project_id,
+                "metadata": metadata or {},
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            document_id = hashlib.md5(f"{content}{file_path}{project_id}".encode()).hexdigest()
+            
+            # Store in Weaviate if available
+            if self.weaviate_client:
+                try:
+                    result = self.weaviate_client.data_object.create(
+                        data_object=doc_data,
+                        class_name=self.default_class_name,
+                        uuid=document_id,
+                        vector=embedding
+                    )
+                    self.logger.debug(f"Added document to Weaviate: {document_id}")
+                except Exception as e:
+                    self.logger.warning(f"Error adding to Weaviate: {e}")
+                    # Fall back to memory store
+                    self.memory_store[document_id] = doc_data
+                    self.memory_embeddings[document_id] = embedding
+            else:
+                # Use memory store
+                self.memory_store[document_id] = doc_data
+                self.memory_embeddings[document_id] = embedding
+            
+            return document_id
+        
+        except Exception as e:
+            self.logger.error(f"Error adding document: {e}")
+            raise
+    
+    async def search_documents(
         self,
         query: str,
         limit: int = 10,
-        filter_metadata: Optional[Dict[str, Any]] = None
-    ) -> List[SearchResult]:
+        filter_conditions: Optional[Dict[str, Any]] = None,
+        project_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Search for similar documents"""
+        try:
+            # Generate query embedding
+            query_embedding = await self._generate_embedding(query)
+            
+            # Search in Weaviate if available
+            if self.weaviate_client:
+                try:
+                    return await self._search_weaviate(
+                        query_embedding, query, limit, filter_conditions, project_id
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Weaviate search error: {e}")
+            
+            # Fallback to memory search
+            return await self._search_memory(
+                query_embedding, query, limit, filter_conditions, project_id
+            )
         
-        if not self.embedding_provider:
-            raise RuntimeError("No embedding provider available")
-        
-        if not self.vector_store:
-            raise RuntimeError("No vector store available")
-        
-        # Generate query embedding
-        query_embedding = await self.embedding_provider.embed_text(query)
-        
-        # Search vector store
-        return await self.vector_store.search(
-            query_embedding=query_embedding,
-            limit=limit,
-            filter_metadata=filter_metadata
-        )
+        except Exception as e:
+            self.logger.error(f"Error searching documents: {e}")
+            return []
     
-    async def delete_documents(self, document_ids: List[str]) -> None:
-        """Delete documents by IDs"""
+    async def _search_weaviate(
+        self,
+        query_embedding: List[float],
+        query_text: str,
+        limit: int,
+        filter_conditions: Optional[Dict[str, Any]],
+        project_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Search using Weaviate"""
+        where_filter = {}
         
-        if not self.vector_store:
-            raise RuntimeError("No vector store available")
+        # Build filter
+        if project_id:
+            where_filter["path"] = ["project_id"]
+            where_filter["operator"] = "Equal"
+            where_filter["valueString"] = project_id
         
-        await self.vector_store.delete_documents(document_ids)
+        if filter_conditions:
+            # Add additional filters (simplified implementation)
+            for key, value in filter_conditions.items():
+                if isinstance(value, str):
+                    where_filter = {
+                        "operator": "And",
+                        "operands": [
+                            where_filter,
+                            {
+                                "path": [key],
+                                "operator": "Equal",
+                                "valueString": value
+                            }
+                        ]
+                    }
+        
+        # Perform search
+        result = (
+            self.weaviate_client.query
+            .get(self.default_class_name, [
+                "content", "document_type", "language", 
+                "file_path", "project_id", "metadata", "timestamp"
+            ])
+            .with_near_vector({"vector": query_embedding})
+            .with_limit(limit)
+            .with_additional(["certainty", "distance"])
+        )
+        
+        if where_filter:
+            result = result.with_where(where_filter)
+        
+        response = result.do()
+        
+        # Parse results
+        documents = []
+        if "data" in response and "Get" in response["data"]:
+            for item in response["data"]["Get"][self.default_class_name]:
+                documents.append({
+                    "content": item["content"],
+                    "document_type": item["document_type"],
+                    "language": item["language"],
+                    "file_path": item["file_path"],
+                    "project_id": item["project_id"],
+                    "metadata": item["metadata"],
+                    "timestamp": item["timestamp"],
+                    "score": item["_additional"]["certainty"],
+                    "distance": item["_additional"]["distance"]
+                })
+        
+        return documents
+    
+    async def _search_memory(
+        self,
+        query_embedding: List[float],
+        query_text: str,
+        limit: int,
+        filter_conditions: Optional[Dict[str, Any]],
+        project_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Search using in-memory store"""
+        if not NUMPY_AVAILABLE:
+            # Fallback to text search
+            return self._text_search_memory(query_text, limit, filter_conditions, project_id)
+        
+        results = []
+        
+        for doc_id, doc_data in self.memory_store.items():
+            # Apply filters
+            if project_id and doc_data.get("project_id") != project_id:
+                continue
+            
+            if filter_conditions:
+                skip = False
+                for key, value in filter_conditions.items():
+                    if doc_data.get(key) != value:
+                        skip = True
+                        break
+                if skip:
+                    continue
+            
+            # Calculate similarity
+            doc_embedding = self.memory_embeddings.get(doc_id, [])
+            if doc_embedding:
+                similarity = self._cosine_similarity(query_embedding, doc_embedding)
+                
+                result = doc_data.copy()
+                result["score"] = similarity
+                result["distance"] = 1.0 - similarity
+                results.append(result)
+        
+        # Sort by similarity and limit
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:limit]
+    
+    def _text_search_memory(
+        self,
+        query_text: str,
+        limit: int,
+        filter_conditions: Optional[Dict[str, Any]],
+        project_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Fallback text search for memory store"""
+        results = []
+        query_words = set(query_text.lower().split())
+        
+        for doc_id, doc_data in self.memory_store.items():
+            # Apply filters
+            if project_id and doc_data.get("project_id") != project_id:
+                continue
+            
+            if filter_conditions:
+                skip = False
+                for key, value in filter_conditions.items():
+                    if doc_data.get(key) != value:
+                        skip = True
+                        break
+                if skip:
+                    continue
+            
+            # Simple text matching
+            content_words = set(doc_data["content"].lower().split())
+            common_words = query_words.intersection(content_words)
+            
+            if common_words:
+                score = len(common_words) / len(query_words.union(content_words))
+                
+                result = doc_data.copy()
+                result["score"] = score
+                result["distance"] = 1.0 - score
+                results.append(result)
+        
+        # Sort by similarity and limit
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:limit]
+    
+    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        if not NUMPY_AVAILABLE:
+            # Manual calculation
+            dot_product = sum(a * b for a, b in zip(vec1, vec2))
+            magnitude1 = sum(a * a for a in vec1) ** 0.5
+            magnitude2 = sum(b * b for b in vec2) ** 0.5
+            
+            if magnitude1 == 0 or magnitude2 == 0:
+                return 0.0
+            
+            return dot_product / (magnitude1 * magnitude2)
+        else:
+            # Use numpy
+            vec1_np = np.array(vec1)
+            vec2_np = np.array(vec2)
+            
+            dot_product = np.dot(vec1_np, vec2_np)
+            norms = np.linalg.norm(vec1_np) * np.linalg.norm(vec2_np)
+            
+            if norms == 0:
+                return 0.0
+            
+            return dot_product / norms
+    
+    async def delete_document(self, document_id: str) -> bool:
+        """Delete a document from the vector store"""
+        try:
+            deleted = False
+            
+            # Delete from Weaviate if available
+            if self.weaviate_client:
+                try:
+                    self.weaviate_client.data_object.delete(
+                        uuid=document_id,
+                        class_name=self.default_class_name
+                    )
+                    deleted = True
+                except Exception as e:
+                    self.logger.warning(f"Error deleting from Weaviate: {e}")
+            
+            # Delete from memory store
+            if document_id in self.memory_store:
+                del self.memory_store[document_id]
+                deleted = True
+            
+            if document_id in self.memory_embeddings:
+                del self.memory_embeddings[document_id]
+            
+            return deleted
+        
+        except Exception as e:
+            self.logger.error(f"Error deleting document {document_id}: {e}")
+            return False
+    
+    async def get_document_count(self, project_id: Optional[str] = None) -> int:
+        """Get count of documents in the store"""
+        try:
+            # Count in Weaviate if available
+            if self.weaviate_client:
+                try:
+                    query = self.weaviate_client.query.aggregate(self.default_class_name)
+                    
+                    if project_id:
+                        query = query.with_where({
+                            "path": ["project_id"],
+                            "operator": "Equal",
+                            "valueString": project_id
+                        })
+                    
+                    result = query.with_meta_count().do()
+                    
+                    if "data" in result and "Aggregate" in result["data"]:
+                        return result["data"]["Aggregate"][self.default_class_name][0]["meta"]["count"]
+                except Exception as e:
+                    self.logger.warning(f"Error counting Weaviate documents: {e}")
+            
+            # Count in memory store
+            if project_id:
+                return sum(
+                    1 for doc in self.memory_store.values()
+                    if doc.get("project_id") == project_id
+                )
+            else:
+                return len(self.memory_store)
+        
+        except Exception as e:
+            self.logger.error(f"Error counting documents: {e}")
+            return 0
     
     async def health_check(self) -> Dict[str, Any]:
-        """Check health of vector store components"""
+        """Check health of the vector store manager"""
+        try:
+            # Test basic operations
+            test_content = f"Health check test document {time.time()}"
+            
+            # Test add
+            doc_id = await self.add_document(
+                content=test_content,
+                document_type="test",
+                project_id="health_check"
+            )
+            
+            # Test search
+            search_results = await self.search_documents(
+                query="health check test",
+                limit=1,
+                project_id="health_check"
+            )
+            
+            # Test delete
+            delete_success = await self.delete_document(doc_id)
+            
+            weaviate_status = "healthy" if self.weaviate_client else "not_available"
+            embedding_provider = "openai" if self.embedding_client else "simple_tfidf"
+            
+            return {
+                "status": "healthy",
+                "weaviate_status": weaviate_status,
+                "embedding_provider": embedding_provider,
+                "memory_store_size": len(self.memory_store),
+                "cache_size": len(self.embedding_cache),
+                "operations": {
+                    "add": bool(doc_id),
+                    "search": len(search_results) > 0,
+                    "delete": delete_success
+                },
+                "timestamp": datetime.now().isoformat()
+            }
         
-        health = {
-            "embedding_provider": "none",
-            "vector_store": "none"
-        }
-        
-        if self.embedding_provider:
-            try:
-                # Test embedding generation
-                await self.embedding_provider.embed_text("test")
-                health["embedding_provider"] = "healthy"
-            except Exception as e:
-                health["embedding_provider"] = f"unhealthy: {str(e)}"
-        
-        if self.vector_store:
-            store_health = await self.vector_store.health_check()
-            health["vector_store"] = store_health
-        
-        return health
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
 
 # Global instance
 vector_store_manager = VectorStoreManager()

@@ -17,7 +17,7 @@ export interface HealthResponse {
 }
 
 export const health = api(
-  { expose: true, method: "GET", path: "/health" },
+  { expose: true, method: "GET", path: "/agents/health" },
   async (): Promise<HealthResponse> => {
     const startTime = Date.now();
     

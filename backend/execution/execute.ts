@@ -300,7 +300,7 @@ export interface ExecutionHealthResponse {
 }
 
 export const getExecutionHealth = api<{}, ExecutionHealthResponse>(
-  { auth: true, expose: true, method: "GET", path: "/execution/health" },
+  { auth: true, expose: true, method: "GET", path: "/execution/status" },
   async () => {
     try {
       // Mock implementation - would integrate with actual execution engine

@@ -387,4 +387,163 @@ const CreateProjectDialog: React.FC<CreateProjectDialogProps> = ({
   );
 };
 
-export default CreateProjectDialog;
+export default CreateProjectDialog;import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Loader2 } from "lucide-react";
+import { useBackend } from "../hooks/useBackend";
+import { useToast } from "@/components/ui/use-toast";
+import { TemplateSelector } from "./TemplateSelector";
+import type { Project } from "~backend/project/types";
+
+interface CreateProjectDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onProjectCreated: (project: Project) => void;
+}
+
+export function CreateProjectDialog({
+  open,
+  onOpenChange,
+  onProjectCreated
+}: CreateProjectDialogProps) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("blank");
+  const [loading, setLoading] = useState(false);
+  const backend = useBackend();
+  const { toast } = useToast();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!name.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Project name is required.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      const project = await backend.project.create({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        template: selectedTemplate
+      });
+
+      onProjectCreated(project);
+      
+      // Reset form
+      setName("");
+      setDescription("");
+      setSelectedTemplate("blank");
+      
+      toast({
+        title: "Project Created",
+        description: `${project.name} has been created successfully.`
+      });
+      
+    } catch (err) {
+      console.error("Failed to create project:", err);
+      toast({
+        title: "Error",
+        description: "Failed to create project. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setName("");
+    setDescription("");
+    setSelectedTemplate("blank");
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>Create New Project</DialogTitle>
+          <DialogDescription>
+            Choose a template and enter project details to get started.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Template Selection */}
+          <div className="space-y-2">
+            <Label>Template</Label>
+            <TemplateSelector
+              selectedTemplate={selectedTemplate}
+              onTemplateChange={setSelectedTemplate}
+            />
+          </div>
+
+          {/* Project Name */}
+          <div className="space-y-2">
+            <Label htmlFor="name">Project Name *</Label>
+            <Input
+              id="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Enter project name"
+              disabled={loading}
+              required
+            />
+          </div>
+
+          {/* Project Description */}
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Textarea
+              id="description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Enter project description (optional)"
+              disabled={loading}
+              rows={3}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCancel}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading || !name.trim()}>
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                "Create Project"
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

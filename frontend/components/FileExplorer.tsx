@@ -389,4 +389,433 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   );
 };
 
-export default FileExplorer;
+export default FileExplorer;import { useState, useRef } from "react";
+import { 
+  ChevronRight, 
+  ChevronDown, 
+  File, 
+  Folder, 
+  FolderOpen,
+  Plus,
+  Trash2,
+  Edit,
+  MoreVertical
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { useBackend } from "../hooks/useBackend";
+import { useToast } from "@/components/ui/use-toast";
+import type { FileNode } from "~backend/filesystem/types";
+
+interface FileExplorerProps {
+  projectId: string;
+  files: FileNode[];
+  currentFile: FileNode | null;
+  onFileSelect: (file: FileNode) => void;
+  onFileCreated: (file: FileNode) => void;
+  onFileDeleted: (path: string) => void;
+}
+
+interface FileTreeProps {
+  files: FileNode[];
+  currentFile: FileNode | null;
+  onFileSelect: (file: FileNode) => void;
+  onRename: (file: FileNode, newName: string) => void;
+  onDelete: (file: FileNode) => void;
+  onCreateFile: (parentPath: string) => void;
+  onCreateFolder: (parentPath: string) => void;
+  level?: number;
+}
+
+function FileTree({ 
+  files, 
+  currentFile, 
+  onFileSelect, 
+  onRename, 
+  onDelete,
+  onCreateFile,
+  onCreateFolder,
+  level = 0 
+}: FileTreeProps) {
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["/"]));
+  const [editingFile, setEditingFile] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const toggleFolder = (path: string) => {
+    setExpandedFolders(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(path)) {
+        newSet.delete(path);
+      } else {
+        newSet.add(path);
+      }
+      return newSet;
+    });
+  };
+
+  const startRename = (file: FileNode) => {
+    setEditingFile(file.path);
+    setEditName(file.name);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const finishRename = () => {
+    if (editingFile && editName.trim()) {
+      const file = files.find(f => f.path === editingFile);
+      if (file && editName !== file.name) {
+        onRename(file, editName.trim());
+      }
+    }
+    setEditingFile(null);
+    setEditName("");
+  };
+
+  const cancelRename = () => {
+    setEditingFile(null);
+    setEditName("");
+  };
+
+  const buildFileTree = (parentPath: string): FileNode[] => {
+    return files
+      .filter(file => {
+        if (parentPath === "/") {
+          return !file.path.includes("/") || file.path === "/";
+        }
+        const relativePath = file.path.startsWith(parentPath + "/") 
+          ? file.path.slice(parentPath.length + 1)
+          : "";
+        return relativePath && !relativePath.includes("/");
+      })
+      .sort((a, b) => {
+        if (a.type !== b.type) {
+          return a.type === "directory" ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+  };
+
+  const renderFile = (file: FileNode) => {
+    const isSelected = currentFile?.path === file.path;
+    const isExpanded = expandedFolders.has(file.path);
+    const isEditing = editingFile === file.path;
+    const childFiles = file.type === "directory" ? buildFileTree(file.path) : [];
+
+    return (
+      <div key={file.path}>
+        <ContextMenu>
+          <ContextMenuTrigger>
+            <div
+              className={`flex items-center gap-2 py-1 px-2 rounded-md cursor-pointer hover:bg-accent ${
+                isSelected ? "bg-accent" : ""
+              }`}
+              style={{ paddingLeft: `${level * 12 + 8}px` }}
+              onClick={() => {
+                if (file.type === "directory") {
+                  toggleFolder(file.path);
+                } else {
+                  onFileSelect(file);
+                }
+              }}
+            >
+              {file.type === "directory" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-4 w-4 p-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFolder(file.path);
+                  }}
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
+                </Button>
+              )}
+              
+              {file.type === "directory" ? (
+                isExpanded ? (
+                  <FolderOpen className="h-4 w-4 text-blue-500" />
+                ) : (
+                  <Folder className="h-4 w-4 text-blue-500" />
+                )
+              ) : (
+                <File className="h-4 w-4 text-muted-foreground" />
+              )}
+
+              {isEditing ? (
+                <Input
+                  ref={inputRef}
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onBlur={finishRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      finishRename();
+                    } else if (e.key === "Escape") {
+                      cancelRename();
+                    }
+                  }}
+                  className="h-6 py-0 px-1 text-sm"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="text-sm truncate">{file.name}</span>
+              )}
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-4 w-4 p-0 ml-auto opacity-0 group-hover:opacity-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreVertical className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => startRename(file)}>
+                    <Edit className="h-4 w-4 mr-2" />
+                    Rename
+                  </DropdownMenuItem>
+                  {file.type === "directory" && (
+                    <>
+                      <DropdownMenuItem onClick={() => onCreateFile(file.path)}>
+                        <File className="h-4 w-4 mr-2" />
+                        New File
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onCreateFolder(file.path)}>
+                        <Folder className="h-4 w-4 mr-2" />
+                        New Folder
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  <DropdownMenuItem 
+                    onClick={() => onDelete(file)}
+                    className="text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onClick={() => startRename(file)}>
+              <Edit className="h-4 w-4 mr-2" />
+              Rename
+            </ContextMenuItem>
+            {file.type === "directory" && (
+              <>
+                <ContextMenuItem onClick={() => onCreateFile(file.path)}>
+                  <File className="h-4 w-4 mr-2" />
+                  New File
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => onCreateFolder(file.path)}>
+                  <Folder className="h-4 w-4 mr-2" />
+                  New Folder
+                </ContextMenuItem>
+              </>
+            )}
+            <ContextMenuItem 
+              onClick={() => onDelete(file)}
+              className="text-destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+
+        {file.type === "directory" && isExpanded && childFiles.length > 0 && (
+          <FileTree
+            files={childFiles}
+            currentFile={currentFile}
+            onFileSelect={onFileSelect}
+            onRename={onRename}
+            onDelete={onDelete}
+            onCreateFile={onCreateFile}
+            onCreateFolder={onCreateFolder}
+            level={level + 1}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const rootFiles = buildFileTree("/");
+
+  return (
+    <div className="space-y-1">
+      {rootFiles.map(renderFile)}
+    </div>
+  );
+}
+
+export function FileExplorer({
+  projectId,
+  files,
+  currentFile,
+  onFileSelect,
+  onFileCreated,
+  onFileDeleted
+}: FileExplorerProps) {
+  const backend = useBackend();
+  const { toast } = useToast();
+
+  const handleRename = async (file: FileNode, newName: string) => {
+    try {
+      const newPath = file.path.replace(file.name, newName);
+      await backend.filesystem.rename({
+        projectId,
+        oldPath: file.path,
+        newPath
+      });
+      
+      // Update the file in the list
+      onFileCreated({ ...file, name: newName, path: newPath });
+      onFileDeleted(file.path);
+      
+      toast({
+        title: "File Renamed",
+        description: `${file.name} renamed to ${newName}`
+      });
+    } catch (err) {
+      console.error("Failed to rename file:", err);
+      toast({
+        title: "Error",
+        description: "Failed to rename file.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDelete = async (file: FileNode) => {
+    try {
+      await backend.filesystem.delete({
+        projectId,
+        path: file.path
+      });
+      
+      onFileDeleted(file.path);
+      
+      toast({
+        title: "File Deleted",
+        description: `${file.name} has been deleted`
+      });
+    } catch (err) {
+      console.error("Failed to delete file:", err);
+      toast({
+        title: "Error",
+        description: "Failed to delete file.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleCreateFile = async (parentPath: string) => {
+    const fileName = prompt("Enter file name:");
+    if (!fileName) return;
+
+    try {
+      const filePath = parentPath === "/" ? fileName : `${parentPath}/${fileName}`;
+      const newFile = await backend.filesystem.create({
+        projectId,
+        path: filePath,
+        type: "file",
+        content: ""
+      });
+      
+      onFileCreated(newFile);
+      
+      toast({
+        title: "File Created",
+        description: `${fileName} has been created`
+      });
+    } catch (err) {
+      console.error("Failed to create file:", err);
+      toast({
+        title: "Error",
+        description: "Failed to create file.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleCreateFolder = async (parentPath: string) => {
+    const folderName = prompt("Enter folder name:");
+    if (!folderName) return;
+
+    try {
+      const folderPath = parentPath === "/" ? folderName : `${parentPath}/${folderName}`;
+      const newFolder = await backend.filesystem.create({
+        projectId,
+        path: folderPath,
+        type: "directory"
+      });
+      
+      onFileCreated(newFolder);
+      
+      toast({
+        title: "Folder Created",
+        description: `${folderName} has been created`
+      });
+    } catch (err) {
+      console.error("Failed to create folder:", err);
+      toast({
+        title: "Error",
+        description: "Failed to create folder.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col border-r bg-card">
+      <div className="p-4 border-b">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm">Explorer</h2>
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleCreateFile("/")}
+              className="h-6 w-6 p-0"
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex-1 overflow-auto p-2">
+        <FileTree
+          files={files}
+          currentFile={currentFile}
+          onFileSelect={onFileSelect}
+          onRename={handleRename}
+          onDelete={handleDelete}
+          onCreateFile={handleCreateFile}
+          onCreateFolder={handleCreateFolder}
+        />
+      </div>
+    </div>
+  );
+}
