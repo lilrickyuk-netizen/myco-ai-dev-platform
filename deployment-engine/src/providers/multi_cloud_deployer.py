@@ -221,13 +221,47 @@ class GCPProvider(BaseCloudProvider):
     async def _deploy_cloud_run_service(self, config: Dict[str, Any], image_uri: str):
         """Deploy service to Cloud Run"""
         # This would use the Cloud Run API to deploy the service
-        # For demo purposes, we'll return a mock service object
-        class MockService:
-            def __init__(self):
-                self.name = f"projects/{self.project_id}/locations/{self.region}/services/{config['app_name']}"
-                self.uri = f"https://{config['app_name']}-hash.{self.region}.run.app"
+        # Deploy to Google Cloud Run
+        from google.cloud import run_v2
         
-        return MockService()
+        client = run_v2.ServicesClient()
+        
+        service = run_v2.Service(
+            spec=run_v2.ServiceSpec(
+                template=run_v2.RevisionTemplate(
+                    spec=run_v2.RevisionSpec(
+                        containers=[
+                            run_v2.Container(
+                                image=image_uri,
+                                ports=[run_v2.ContainerPort(container_port=config.get('port', 8080))],
+                                env=[
+                                    run_v2.EnvVar(name=k, value=v) 
+                                    for k, v in config.get('env_vars', {}).items()
+                                ],
+                                resources=run_v2.ResourceRequirements(
+                                    limits={
+                                        'cpu': config.get('cpu', '1'),
+                                        'memory': config.get('memory', '1Gi')
+                                    }
+                                )
+                            )
+                        ]
+                    )
+                )
+            )
+        )
+        
+        parent = f"projects/{self.project_id}/locations/{self.region}"
+        request = run_v2.CreateServiceRequest(
+            parent=parent,
+            service=service,
+            service_id=config['app_name']
+        )
+        
+        operation = client.create_service(request=request)
+        result = operation.result()
+        
+        return result
 
 class AzureProvider(BaseCloudProvider):
     """Azure deployment provider using Container Instances"""

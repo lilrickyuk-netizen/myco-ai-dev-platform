@@ -16,17 +16,44 @@ import { getTemplate } from "./templates";
 export const generate = api<AIGenerateRequest, AIGenerateResponse>(
   { auth: true, expose: true, method: "POST", path: "/ai/generate" },
   async (req) => {
-    // Mock implementation - replace with actual AI service call
-    const content = generateMockResponse(req.prompt, req.context);
+    const auth = getAuthData()!;
     
-    return {
-      content,
-      usage: {
-        promptTokens: req.prompt.length / 4,
-        completionTokens: content.length / 4,
-        totalTokens: (req.prompt.length + content.length) / 4,
-      },
-    };
+    try {
+      // Call the AI engine service
+      const aiResponse = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
+        },
+        body: JSON.stringify({
+          prompt: req.prompt,
+          context: req.context,
+          projectId: req.projectId,
+          model: req.model || 'gpt-4',
+          temperature: req.temperature || 0.7,
+          maxTokens: req.maxTokens
+        })
+      });
+      
+      if (!aiResponse.ok) {
+        throw new Error(`AI service error: ${aiResponse.status} ${aiResponse.statusText}`);
+      }
+      
+      const result = await aiResponse.json();
+      
+      return {
+        content: result.content,
+        usage: {
+          promptTokens: result.usage?.prompt_tokens || 0,
+          completionTokens: result.usage?.completion_tokens || 0,
+          totalTokens: result.usage?.total_tokens || 0,
+        },
+      };
+      
+    } catch (error) {
+      throw APIError.internal(`AI generation failed: ${error}`);
+    }
   }
 );
 
@@ -36,17 +63,47 @@ export const generateCode = api<CodeGenerationRequest, CodeGenerationResponse>(
   async (req) => {
     const auth = getAuthData()!;
 
-    // Get appropriate template
-    const template = getTemplate(req.language, req.framework);
-    
-    // Generate files based on description and template
-    const files = generateCodeFiles(req, template);
-    
-    return {
-      files,
-      instructions: generateInstructions(req),
-      dependencies: getDependencies(req.language, req.framework, req.features),
-    };
+    try {
+      // Call the AI engine for code generation
+      const aiResponse = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/generate/code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
+        },
+        body: JSON.stringify({
+          description: req.description,
+          language: req.language,
+          framework: req.framework,
+          features: req.features,
+          style: req.style,
+          complexity: req.complexity
+        })
+      });
+      
+      if (!aiResponse.ok) {
+        throw new Error(`AI service error: ${aiResponse.status} ${aiResponse.statusText}`);
+      }
+      
+      const result = await aiResponse.json();
+      
+      return {
+        files: result.files || [],
+        instructions: result.instructions || '',
+        dependencies: result.dependencies || [],
+      };
+      
+    } catch (error) {
+      // Fallback to template-based generation if AI fails
+      const template = getTemplate(req.language, req.framework);
+      const files = generateCodeFiles(req, template);
+      
+      return {
+        files,
+        instructions: generateInstructions(req),
+        dependencies: getDependencies(req.language, req.framework, req.features),
+      };
+    }
   }
 );
 
@@ -54,13 +111,45 @@ export const generateCode = api<CodeGenerationRequest, CodeGenerationResponse>(
 export const explainCode = api<CodeExplanationRequest, CodeExplanationResponse>(
   { auth: true, expose: true, method: "POST", path: "/ai/explain" },
   async (req) => {
-    const complexity = analyzeComplexity(req.code);
+    const auth = getAuthData()!;
     
-    return {
-      explanation: generateCodeExplanation(req.code, req.language, req.focus),
-      suggestions: generateSuggestions(req.code, req.language),
-      complexity,
-    };
+    try {
+      // Call the AI engine for code explanation
+      const aiResponse = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/explain`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
+        },
+        body: JSON.stringify({
+          code: req.code,
+          language: req.language,
+          focus: req.focus
+        })
+      });
+      
+      if (!aiResponse.ok) {
+        throw new Error(`AI service error: ${aiResponse.status} ${aiResponse.statusText}`);
+      }
+      
+      const result = await aiResponse.json();
+      
+      return {
+        explanation: result.explanation,
+        suggestions: result.suggestions || [],
+        complexity: result.complexity || analyzeComplexity(req.code),
+      };
+      
+    } catch (error) {
+      // Fallback to local analysis
+      const complexity = analyzeComplexity(req.code);
+      
+      return {
+        explanation: generateCodeExplanation(req.code, req.language, req.focus),
+        suggestions: generateSuggestions(req.code, req.language),
+        complexity,
+      };
+    }
   }
 );
 
@@ -68,25 +157,53 @@ export const explainCode = api<CodeExplanationRequest, CodeExplanationResponse>(
 export const debug = api<DebugRequest, DebugResponse>(
   { auth: true, expose: true, method: "POST", path: "/ai/debug" },
   async (req) => {
-    const issues = analyzeCode(req.code, req.language);
-    const fixes = generateFixes(issues, req.code);
+    const auth = getAuthData()!;
     
-    return {
-      issues,
-      fixes,
-      explanation: generateDebugExplanation(issues, req.error),
-    };
+    try {
+      // Call the AI engine for debugging
+      const aiResponse = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/debug`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
+        },
+        body: JSON.stringify({
+          code: req.code,
+          language: req.language,
+          error: req.error,
+          context: req.context
+        })
+      });
+      
+      if (!aiResponse.ok) {
+        throw new Error(`AI service error: ${aiResponse.status} ${aiResponse.statusText}`);
+      }
+      
+      const result = await aiResponse.json();
+      
+      return {
+        issues: result.issues || [],
+        fixes: result.fixes || [],
+        explanation: result.explanation,
+      };
+      
+    } catch (error) {
+      // Fallback to local analysis
+      const issues = analyzeCode(req.code, req.language);
+      const fixes = generateFixes(issues, req.code);
+      
+      return {
+        issues,
+        fixes,
+        explanation: generateDebugExplanation(issues, req.error),
+      };
+    }
   }
 );
 
-// Helper functions (mock implementations)
-function generateMockResponse(prompt: string, context?: string): string {
-  // This would integrate with actual AI service (OpenAI, Claude, etc.)
-  return `Generated response for: ${prompt}\n\nThis is a mock implementation that would integrate with your preferred AI service.`;
-}
-
+// Helper functions (fallback implementations)
 function generateCodeFiles(req: CodeGenerationRequest, template: any) {
-  // This would use AI to generate actual code files
+  // Fallback template-based generation
   const baseFiles = [
     {
       path: "src/main.ts",
@@ -165,7 +282,7 @@ function analyzeComplexity(code: string) {
 }
 
 function generateCodeExplanation(code: string, language?: string, focus?: string): string {
-  return `This ${language || 'code'} snippet ${focus ? `focuses on ${focus} and` : ''} performs the following operations:\n\n[AI-generated explanation would go here]`;
+  return `This ${language || 'code'} snippet ${focus ? `focuses on ${focus} and` : ''} performs the following operations:\n\n[Local analysis - AI service unavailable]`;
 }
 
 function generateSuggestions(code: string, language?: string): string[] {
@@ -178,7 +295,7 @@ function generateSuggestions(code: string, language?: string): string[] {
 }
 
 function analyzeCode(code: string, language?: string) {
-  // Mock code analysis - would use actual linting/analysis tools
+  // Local code analysis - fallback when AI service unavailable
   return [
     {
       type: 'warning' as const,

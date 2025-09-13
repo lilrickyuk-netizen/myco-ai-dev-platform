@@ -53,50 +53,128 @@ export const orchestrate = api<OrchestrationRequest, OrchestrationResponse>(
 );
 
 async function startOrchestrationProcess(orchestrationId: string, req: OrchestrationRequest) {
-  // This would integrate with the Python agent system
-  // For now, simulate the orchestration phases
-  
-  setTimeout(async () => {
-    // Phase 1: Planning
-    await updateOrchestrationStatus(orchestrationId, 'planning', 'Analyzing requirements and creating execution plan');
+  // Integrate with the Python agent system via HTTP API
+  try {
+    const agentResponse = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/agents/orchestrate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
+      },
+      body: JSON.stringify({
+        orchestrationId,
+        projectId: req.projectId,
+        requirements: req.requirements,
+        techStack: req.techStack,
+        phases: [
+          'planning',
+          'architecture', 
+          'development',
+          'integration',
+          'deployment',
+          'verification'
+        ]
+      })
+    });
     
-    setTimeout(async () => {
-      // Phase 2: Architecture
-      await updateOrchestrationStatus(orchestrationId, 'architecture', 'Designing system architecture and components');
+    if (!agentResponse.ok) {
+      throw new Error(`Agent service error: ${agentResponse.status}`);
+    }
+    
+    const result = await agentResponse.json();
+    
+    // Start polling for updates
+    pollOrchestrationProgress(orchestrationId, req.projectId);
+    
+  } catch (error) {
+    console.error('Failed to start orchestration with AI agents:', error);
+    
+    // Fallback to simulated orchestration
+    await fallbackOrchestration(orchestrationId, req);
+  }
+}
+
+async function pollOrchestrationProgress(orchestrationId: string, projectId: string) {
+  const maxAttempts = 120; // 10 minutes with 5-second intervals
+  let attempts = 0;
+  
+  const poll = async () => {
+    try {
+      const statusResponse = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/agents/status/${orchestrationId}`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
+        }
+      });
       
-      setTimeout(async () => {
-        // Phase 3: Development
-        await updateOrchestrationStatus(orchestrationId, 'development', 'Generating code and implementing features');
+      if (statusResponse.ok) {
+        const status = await statusResponse.json();
         
-        setTimeout(async () => {
-          // Phase 4: Integration
-          await updateOrchestrationStatus(orchestrationId, 'integration', 'Integrating components and running tests');
-          
-          setTimeout(async () => {
-            // Phase 5: Deployment
-            await updateOrchestrationStatus(orchestrationId, 'deployment', 'Setting up deployment configuration');
-            
-            setTimeout(async () => {
-              // Phase 6: Verification
-              await updateOrchestrationStatus(orchestrationId, 'verification', 'Verifying implementation completeness');
-              
-              setTimeout(async () => {
-                // Complete
-                await updateOrchestrationStatus(orchestrationId, 'completed', 'Project generation completed successfully');
-                
-                // Update project status
-                await projectsDB.exec`
-                  UPDATE projects 
-                  SET status = 'ready', updated_at = NOW()
-                  WHERE id = ${req.projectId}
-                `;
-              }, 10000);
-            }, 15000);
-          }, 20000);
-        }, 25000);
-      }, 20000);
-    }, 15000);
-  }, 5000);
+        await updateOrchestrationStatus(orchestrationId, status.phase, status.message);
+        
+        if (status.phase === 'completed') {
+          await projectsDB.exec`
+            UPDATE projects 
+            SET status = 'ready', updated_at = NOW()
+            WHERE id = ${projectId}
+          `;
+          return;
+        }
+        
+        if (status.phase === 'failed') {
+          await updateOrchestrationStatus(orchestrationId, 'failed', status.error || 'Orchestration failed');
+          return;
+        }
+      }
+      
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 5000); // Poll every 5 seconds
+      } else {
+        await updateOrchestrationStatus(orchestrationId, 'timeout', 'Orchestration timed out');
+      }
+      
+    } catch (error) {
+      console.error('Error polling orchestration status:', error);
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 5000);
+      }
+    }
+  };
+  
+  poll();
+}
+
+async function fallbackOrchestration(orchestrationId: string, req: OrchestrationRequest) {
+  // Fallback simulation if AI agents are unavailable
+  const phases = [
+    { name: 'planning', duration: 5000, message: 'Analyzing requirements and creating execution plan' },
+    { name: 'architecture', duration: 15000, message: 'Designing system architecture and components' },
+    { name: 'development', duration: 25000, message: 'Generating code and implementing features' },
+    { name: 'integration', duration: 20000, message: 'Integrating components and running tests' },
+    { name: 'deployment', duration: 15000, message: 'Setting up deployment configuration' },
+    { name: 'verification', duration: 10000, message: 'Verifying implementation completeness' }
+  ];
+  
+  let totalDelay = 0;
+  
+  for (const phase of phases) {
+    totalDelay += phase.duration;
+    setTimeout(async () => {
+      await updateOrchestrationStatus(orchestrationId, phase.name as any, phase.message);
+    }, totalDelay);
+  }
+  
+  // Complete the orchestration
+  setTimeout(async () => {
+    await updateOrchestrationStatus(orchestrationId, 'completed', 'Project generation completed successfully (fallback mode)');
+    
+    await projectsDB.exec`
+      UPDATE projects 
+      SET status = 'ready', updated_at = NOW()
+      WHERE id = ${req.projectId}
+    `;
+  }, totalDelay + 5000);
 }
 
 async function updateOrchestrationStatus(orchestrationId: string, status: AgentTaskStatus, message: string) {

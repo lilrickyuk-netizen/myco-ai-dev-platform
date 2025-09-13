@@ -90,6 +90,42 @@ class Settings(BaseSettings):
     
     # Development settings
     ENABLE_MOCK_RESPONSES: bool = Field(default=False, env="ENABLE_MOCK_RESPONSES")
+    
+    # Real API Keys
+    OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    ANTHROPIC_API_KEY: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
+    GOOGLE_API_KEY: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
+    COHERE_API_KEY: Optional[str] = Field(default=None, env="COHERE_API_KEY")
+    
+    # Vector Store Configuration
+    PINECONE_API_KEY: Optional[str] = Field(default=None, env="PINECONE_API_KEY")
+    PINECONE_ENVIRONMENT: str = Field(default="us-west1-gcp", env="PINECONE_ENVIRONMENT")
+    PINECONE_INDEX_NAME: str = Field(default="myco-vectors", env="PINECONE_INDEX_NAME")
+    
+    # Cloud Provider API Keys
+    AWS_ACCESS_KEY_ID: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
+    AWS_REGION: str = Field(default="us-east-1", env="AWS_REGION")
+    
+    GCP_PROJECT_ID: Optional[str] = Field(default=None, env="GCP_PROJECT_ID")
+    GCP_SERVICE_ACCOUNT_KEY: Optional[str] = Field(default=None, env="GCP_SERVICE_ACCOUNT_KEY")
+    
+    AZURE_SUBSCRIPTION_ID: Optional[str] = Field(default=None, env="AZURE_SUBSCRIPTION_ID")
+    AZURE_RESOURCE_GROUP: Optional[str] = Field(default=None, env="AZURE_RESOURCE_GROUP")
+    AZURE_CLIENT_ID: Optional[str] = Field(default=None, env="AZURE_CLIENT_ID")
+    AZURE_CLIENT_SECRET: Optional[str] = Field(default=None, env="AZURE_CLIENT_SECRET")
+    AZURE_TENANT_ID: Optional[str] = Field(default=None, env="AZURE_TENANT_ID")
+    
+    # Authentication Configuration
+    JWT_SECRET_KEY: str = Field(default="your-super-secret-jwt-key-change-in-production", env="JWT_SECRET_KEY")
+    JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
+    JWT_EXPIRATION_HOURS: int = Field(default=24, env="JWT_EXPIRATION_HOURS")
+    
+    # OAuth Configuration
+    GITHUB_CLIENT_ID: Optional[str] = Field(default=None, env="GITHUB_CLIENT_ID")
+    GITHUB_CLIENT_SECRET: Optional[str] = Field(default=None, env="GITHUB_CLIENT_SECRET")
+    GOOGLE_OAUTH_CLIENT_ID: Optional[str] = Field(default=None, env="GOOGLE_OAUTH_CLIENT_ID")
+    GOOGLE_OAUTH_CLIENT_SECRET: Optional[str] = Field(default=None, env="GOOGLE_OAUTH_CLIENT_SECRET")
     MOCK_RESPONSE_DELAY: float = Field(default=0.5, env="MOCK_RESPONSE_DELAY")
     
     class Config:

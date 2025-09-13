@@ -404,13 +404,53 @@ async function updateSessionProgress(sessionId: string, total: number, completed
 
 // Mock implementation of task execution pipeline
 async function executeTasksPipeline(sessionId: string, tasks: any[]) {
-  // This would implement the actual agent coordination logic
-  // For now, we'll simulate task completion
-  setTimeout(async () => {
+  // Real implementation of agent coordination logic
+  try {
+    for (const task of tasks) {
+      await updateSessionProgress(sessionId, tasks.length, tasks.indexOf(task));
+      
+      // Call AI engine to execute the task
+      const response = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/agents/execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
+        },
+        body: JSON.stringify({
+          sessionId,
+          task,
+          agentType: task.agentName
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Agent execution failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      // Store task result
+      await agentsDB.exec`
+        INSERT INTO agent_task_results (session_id, task_name, result, created_at)
+        VALUES (${sessionId}, ${task.agentName}, ${JSON.stringify(result)}, NOW())
+      `;
+    }
+    
+    // Mark session as completed
     await agentsDB.exec`
       UPDATE agent_sessions 
       SET status = 'completed', completed_at = NOW(), updated_at = NOW()
       WHERE id = ${sessionId}
     `;
-  }, 30000); // 30 second mock completion
+    
+  } catch (error) {
+    console.error('Task pipeline execution failed:', error);
+    
+    // Mark session as failed
+    await agentsDB.exec`
+      UPDATE agent_sessions 
+      SET status = 'failed', error_message = ${error.message}, completed_at = NOW(), updated_at = NOW()
+      WHERE id = ${sessionId}
+    `;
+  }
 }
