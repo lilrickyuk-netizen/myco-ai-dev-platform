@@ -1,38 +1,33 @@
-import os
+import asyncio
 import json
-import tempfile
-import subprocess
+import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-from ..base_agent import BaseAgent, AgentType, Task, AgentExecutionContext
+from ..base_agent import BaseAgent, AgentType, Task, TaskPriority, AgentExecutionContext
+import uuid
 
 class BackendAgent(BaseAgent):
     def __init__(self):
-        super().__init__("backend-001", AgentType.BACKEND)
+        super().__init__("backend-001", AgentType.BACKEND_DEVELOPER)
         self.capabilities = [
             "api_development",
-            "database_modeling",
-            "authentication",
-            "middleware_development",
-            "service_architecture",
-            "microservices",
-            "testing",
-            "documentation"
+            "database_design",
+            "server_implementation",
+            "authentication_setup",
+            "api_documentation",
+            "testing_framework",
+            "security_implementation"
         ]
         self.supported_frameworks = [
-            "express", "fastapi", "django", "spring-boot", 
-            "gin", "fiber", "rails", "laravel", "nestjs"
+            "express", "fastapi", "django", "spring", "rails", "encore"
         ]
-    
+        self.logger = logging.getLogger(__name__)
+        
     def can_handle_task(self, task: Task) -> bool:
         backend_tasks = [
-            "develop_backend",
-            "create_api_endpoints",
-            "setup_database",
-            "implement_authentication",
-            "create_middleware",
-            "setup_testing",
-            "generate_backend_docs"
+            "develop_backend", "create_api", "setup_database",
+            "implement_auth", "create_routes", "setup_middleware",
+            "generate_api_docs", "setup_testing"
         ]
         return task.type in backend_tasks
     
@@ -40,444 +35,422 @@ class BackendAgent(BaseAgent):
         """Execute backend development tasks"""
         if task.type == "develop_backend":
             return await self._develop_complete_backend(task, context)
-        elif task.type == "create_api_endpoints":
+        elif task.type == "create_api":
             return await self._create_api_endpoints(task, context)
         elif task.type == "setup_database":
             return await self._setup_database(task, context)
-        elif task.type == "implement_authentication":
+        elif task.type == "implement_auth":
             return await self._implement_authentication(task, context)
-        elif task.type == "create_middleware":
-            return await self._create_middleware(task, context)
-        elif task.type == "setup_testing":
-            return await self._setup_testing(task, context)
-        elif task.type == "generate_backend_docs":
-            return await self._generate_documentation(task, context)
         else:
             raise ValueError(f"Unknown task type: {task.type}")
     
     async def _develop_complete_backend(self, task: Task, context: AgentExecutionContext) -> Dict[str, Any]:
         """Generate complete backend implementation"""
+        self.logger.info(f"Developing complete backend for project: {context.project_id}")
+        
+        # Extract requirements from task inputs
         architecture = task.inputs.get("architecture", {})
         requirements = task.inputs.get("requirements", {})
+        tech_stack = context.tech_stack
         
-        # Determine framework based on tech stack
-        framework = self._determine_framework(context.tech_stack)
+        # Determine backend framework
+        framework = self._select_backend_framework(tech_stack, requirements)
         
-        # Generate project structure
-        project_structure = await self._generate_project_structure(framework, context)
-        
-        # Generate database models
-        models = await self._generate_database_models(requirements, framework)
+        # Generate backend structure
+        backend_structure = await self._generate_backend_structure(framework, requirements)
         
         # Generate API endpoints
-        endpoints = await self._generate_api_endpoints(requirements, framework)
+        api_endpoints = await self._generate_api_endpoints(requirements, framework)
+        
+        # Generate database models
+        database_models = await self._generate_database_models(requirements)
         
         # Generate authentication system
-        auth_system = await self._generate_authentication_system(framework)
+        auth_system = await self._generate_auth_system(framework, requirements)
         
-        # Generate middleware
-        middleware = await self._generate_middleware(framework)
-        
-        # Generate configuration files
-        config_files = await self._generate_configuration_files(framework, context)
+        # Generate middleware and utilities
+        middleware = await self._generate_middleware(framework, requirements)
         
         # Generate tests
-        tests = await self._generate_tests(framework, endpoints)
+        tests = await self._generate_backend_tests(framework, api_endpoints)
         
-        # Generate documentation
-        documentation = await self._generate_api_documentation(endpoints, framework)
+        # Generate configuration
+        configuration = await self._generate_backend_config(framework, requirements)
         
         return {
             "framework": framework,
-            "project_structure": project_structure,
-            "models": models,
-            "endpoints": endpoints,
+            "structure": backend_structure,
+            "api_endpoints": api_endpoints,
+            "database_models": database_models,
             "authentication": auth_system,
             "middleware": middleware,
-            "configuration": config_files,
             "tests": tests,
-            "documentation": documentation,
-            "package_dependencies": await self._get_package_dependencies(framework),
-            "deployment_config": await self._generate_deployment_config(framework),
-            "quality_score": 0.95  # High quality backend implementation
+            "configuration": configuration,
+            "files_generated": len(backend_structure["files"]),
+            "quality_score": await self._calculate_backend_quality_score(
+                api_endpoints, database_models, tests
+            )
         }
     
-    def _determine_framework(self, tech_stack: List[str]) -> str:
-        """Determine backend framework from tech stack"""
-        framework_mapping = {
-            "node": "express",
-            "nodejs": "express",
-            "express": "express",
-            "nestjs": "nestjs",
-            "python": "fastapi",
-            "fastapi": "fastapi",
-            "django": "django",
-            "java": "spring-boot",
-            "spring": "spring-boot",
-            "go": "gin",
-            "golang": "gin",
-            "ruby": "rails",
-            "php": "laravel",
-            "typescript": "nestjs"
+    def _select_backend_framework(self, tech_stack: Dict[str, Any], requirements: Dict[str, Any]) -> str:
+        """Select the most appropriate backend framework"""
+        preferred = tech_stack.get("backend_framework", "").lower()
+        
+        if preferred in self.supported_frameworks:
+            return preferred
+        
+        # Default selection based on requirements
+        if requirements.get("real_time", False):
+            return "express"  # Good WebSocket support
+        elif requirements.get("ai_integration", False):
+            return "fastapi"  # Good for ML integration
+        elif requirements.get("enterprise", False):
+            return "spring"   # Enterprise features
+        else:
+            return "express"  # Most versatile
+    
+    async def _generate_backend_structure(self, framework: str, requirements: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate backend project structure"""
+        if framework == "express":
+            return await self._generate_express_structure(requirements)
+        elif framework == "fastapi":
+            return await self._generate_fastapi_structure(requirements)
+        elif framework == "encore":
+            return await self._generate_encore_structure(requirements)
+        else:
+            return await self._generate_generic_structure(framework, requirements)
+    
+    async def _generate_express_structure(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate Express.js project structure"""
+        base_structure = {
+            "directories": [
+                "src/",
+                "src/controllers/",
+                "src/models/",
+                "src/routes/",
+                "src/middleware/",
+                "src/services/",
+                "src/utils/",
+                "src/config/",
+                "tests/",
+                "tests/unit/",
+                "tests/integration/"
+            ],
+            "files": [
+                {
+                    "path": "package.json",
+                    "content": self._generate_express_package_json(requirements),
+                    "description": "Project dependencies and scripts"
+                },
+                {
+                    "path": "src/app.ts",
+                    "content": self._generate_express_app_file(requirements),
+                    "description": "Main application setup"
+                },
+                {
+                    "path": "src/server.ts",
+                    "content": self._generate_express_server_file(),
+                    "description": "Server entry point"
+                },
+                {
+                    "path": "tsconfig.json",
+                    "content": self._generate_typescript_config(),
+                    "description": "TypeScript configuration"
+                },
+                {
+                    "path": ".env.example",
+                    "content": self._generate_env_template(requirements),
+                    "description": "Environment variables template"
+                }
+            ]
         }
         
-        for tech in tech_stack:
-            if tech.lower() in framework_mapping:
-                return framework_mapping[tech.lower()]
+        # Add additional files based on requirements
+        if requirements.get("database", True):
+            base_structure["files"].append({
+                "path": "src/database.ts",
+                "content": self._generate_database_connection(),
+                "description": "Database connection setup"
+            })
         
-        # Default to Express.js
-        return "express"
+        if requirements.get("authentication", True):
+            base_structure["files"].append({
+                "path": "src/middleware/auth.ts",
+                "content": self._generate_auth_middleware(),
+                "description": "Authentication middleware"
+            })
+        
+        return base_structure
     
-    async def _generate_project_structure(self, framework: str, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Generate backend project directory structure"""
-        structures = {
-            "express": {
-                "src/": {
-                    "controllers/": {},
-                    "models/": {},
-                    "routes/": {},
-                    "middleware/": {},
-                    "services/": {},
-                    "utils/": {},
-                    "config/": {},
-                    "types/": {}
-                },
-                "tests/": {
-                    "unit/": {},
-                    "integration/": {},
-                    "fixtures/": {}
-                },
-                "docs/": {},
-                "package.json": {},
-                "tsconfig.json": {},
-                ".env.example": {},
-                "docker-compose.yml": {},
-                "Dockerfile": {},
-                "README.md": {}
-            },
-            "fastapi": {
-                "app/": {
-                    "api/": {
-                        "endpoints/": {},
-                        "dependencies/": {}
-                    },
-                    "core/": {},
-                    "models/": {},
-                    "schemas/": {},
-                    "services/": {},
-                    "utils/": {},
-                    "db/": {}
-                },
-                "tests/": {},
-                "docs/": {},
-                "requirements.txt": {},
-                "pyproject.toml": {},
-                "Dockerfile": {},
-                "docker-compose.yml": {},
-                ".env.example": {},
-                "README.md": {}
-            },
-            "nestjs": {
-                "src/": {
-                    "modules/": {},
-                    "controllers/": {},
-                    "services/": {},
-                    "entities/": {},
-                    "dto/": {},
-                    "guards/": {},
-                    "decorators/": {},
-                    "filters/": {},
-                    "interceptors/": {},
-                    "pipes/": {},
-                    "config/": {}
-                },
-                "test/": {},
-                "dist/": {},
-                "package.json": {},
-                "tsconfig.json": {},
-                "nest-cli.json": {},
-                ".env.example": {},
-                "Dockerfile": {},
-                "README.md": {}
-            }
+    async def _generate_encore_structure(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate Encore.ts project structure"""
+        services = requirements.get("services", ["main"])
+        
+        base_structure = {
+            "directories": [
+                "backend/",
+            ] + [f"backend/{service}/" for service in services],
+            "files": []
         }
         
-        return structures.get(framework, structures["express"])
-    
-    async def _generate_database_models(self, requirements: Dict[str, Any], framework: str) -> Dict[str, Any]:
-        """Generate database models based on requirements"""
-        entities = requirements.get("entities", [])
-        models = {}
-        
-        for entity in entities:
-            entity_name = entity.get("name", "")
-            fields = entity.get("fields", [])
-            relationships = entity.get("relationships", [])
+        # Generate service files
+        for service in services:
+            base_structure["files"].extend([
+                {
+                    "path": f"backend/{service}/encore.service.ts",
+                    "content": self._generate_encore_service_file(service),
+                    "description": f"Encore service definition for {service}"
+                },
+                {
+                    "path": f"backend/{service}/types.ts",
+                    "content": self._generate_encore_types(service, requirements),
+                    "description": f"Type definitions for {service} service"
+                }
+            ])
             
-            if framework == "express":
-                models[f"{entity_name}.model.ts"] = self._generate_sequelize_model(entity_name, fields, relationships)
-            elif framework == "fastapi":
-                models[f"{entity_name}.py"] = self._generate_sqlalchemy_model(entity_name, fields, relationships)
-            elif framework == "nestjs":
-                models[f"{entity_name}.entity.ts"] = self._generate_typeorm_entity(entity_name, fields, relationships)
+            # Generate API endpoints based on service
+            endpoints = self._get_service_endpoints(service, requirements)
+            for endpoint in endpoints:
+                base_structure["files"].append({
+                    "path": f"backend/{service}/{endpoint['name']}.ts",
+                    "content": self._generate_encore_endpoint(endpoint, service),
+                    "description": f"{endpoint['description']} endpoint"
+                })
         
-        return models
+        return base_structure
     
-    async def _generate_api_endpoints(self, requirements: Dict[str, Any], framework: str) -> Dict[str, Any]:
-        """Generate REST API endpoints"""
-        entities = requirements.get("entities", [])
-        endpoints = {}
-        
-        for entity in entities:
-            entity_name = entity.get("name", "")
-            
-            if framework == "express":
-                endpoints[f"{entity_name}.routes.ts"] = self._generate_express_routes(entity_name)
-                endpoints[f"{entity_name}.controller.ts"] = self._generate_express_controller(entity_name)
-            elif framework == "fastapi":
-                endpoints[f"{entity_name}.py"] = self._generate_fastapi_router(entity_name)
-            elif framework == "nestjs":
-                endpoints[f"{entity_name}.controller.ts"] = self._generate_nestjs_controller(entity_name)
-                endpoints[f"{entity_name}.service.ts"] = self._generate_nestjs_service(entity_name)
-        
-        return endpoints
-    
-    def _generate_sequelize_model(self, entity_name: str, fields: List[Dict], relationships: List[Dict]) -> str:
-        """Generate Sequelize model for Express.js"""
-        return f"""
-import {{ DataTypes, Model }} from 'sequelize';
-import {{ sequelize }} from '../config/database';
-
-export class {entity_name} extends Model {{
-  public id!: number;
-  // Add other fields based on requirements
-  public readonly createdAt!: Date;
-  public readonly updatedAt!: Date;
-}}
-
-{entity_name}.init(
-  {{
-    id: {{
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
-      primaryKey: true,
-    }},
-    // Add field definitions based on requirements
-  }},
-  {{
-    sequelize,
-    modelName: '{entity_name}',
-    tableName: '{entity_name.lower()}s',
-  }}
-);
-"""
-    
-    def _generate_express_controller(self, entity_name: str) -> str:
-        """Generate Express.js controller"""
-        return f"""
-import {{ Request, Response }} from 'express';
-import {{ {entity_name} }} from '../models/{entity_name}.model';
-
-export class {entity_name}Controller {{
-  async create(req: Request, res: Response) {{
-    try {{
-      const {entity_name.lower()} = await {entity_name}.create(req.body);
-      res.status(201).json({entity_name.lower()});
-    }} catch (error) {{
-      res.status(400).json({{ error: error.message }});
-    }}
-  }}
-
-  async findAll(req: Request, res: Response) {{
-    try {{
-      const {entity_name.lower()}s = await {entity_name}.findAll();
-      res.json({entity_name.lower()}s);
-    }} catch (error) {{
-      res.status(500).json({{ error: error.message }});
-    }}
-  }}
-
-  async findOne(req: Request, res: Response) {{
-    try {{
-      const {entity_name.lower()} = await {entity_name}.findByPk(req.params.id);
-      if (!{entity_name.lower()}) {{
-        return res.status(404).json({{ error: '{entity_name} not found' }});
-      }}
-      res.json({entity_name.lower()});
-    }} catch (error) {{
-      res.status(500).json({{ error: error.message }});
-    }}
-  }}
-
-  async update(req: Request, res: Response) {{
-    try {{
-      const [{entity_name.lower()}, updated] = await {entity_name}.update(req.body, {{
-        where: {{ id: req.params.id }},
-        returning: true,
-      }});
-      if (!updated) {{
-        return res.status(404).json({{ error: '{entity_name} not found' }});
-      }}
-      res.json({entity_name.lower()});
-    }} catch (error) {{
-      res.status(400).json({{ error: error.message }});
-    }}
-  }}
-
-  async delete(req: Request, res: Response) {{
-    try {{
-      const deleted = await {entity_name}.destroy({{
-        where: {{ id: req.params.id }},
-      }});
-      if (!deleted) {{
-        return res.status(404).json({{ error: '{entity_name} not found' }});
-      }}
-      res.status(204).send();
-    }} catch (error) {{
-      res.status(500).json({{ error: error.message }});
-    }}
-  }}
-}}
-"""
-    
-    async def _get_package_dependencies(self, framework: str) -> Dict[str, str]:
-        """Get package dependencies for the framework"""
+    def _generate_express_package_json(self, requirements: Dict[str, Any]) -> str:
+        """Generate package.json for Express project"""
         dependencies = {
-            "express": {
-                "express": "^4.18.0",
-                "cors": "^2.8.5",
-                "helmet": "^6.0.0",
-                "morgan": "^1.10.0",
-                "compression": "^1.7.4",
-                "express-rate-limit": "^6.6.0",
-                "dotenv": "^16.0.3",
+            "express": "^4.18.2",
+            "@types/express": "^4.17.21",
+            "typescript": "^5.3.3",
+            "ts-node": "^10.9.1",
+            "cors": "^2.8.5",
+            "@types/cors": "^2.8.17",
+            "helmet": "^7.1.0",
+            "dotenv": "^16.3.1",
+            "compression": "^1.7.4",
+            "@types/compression": "^1.7.5"
+        }
+        
+        if requirements.get("database", True):
+            dependencies.update({
+                "pg": "^8.11.3",
+                "@types/pg": "^8.10.9",
+                "typeorm": "^0.3.17"
+            })
+        
+        if requirements.get("authentication", True):
+            dependencies.update({
+                "jsonwebtoken": "^9.0.2",
+                "@types/jsonwebtoken": "^9.0.6",
                 "bcryptjs": "^2.4.3",
-                "jsonwebtoken": "^8.5.1",
-                "sequelize": "^6.25.0",
-                "pg": "^8.8.0",
-                "redis": "^4.5.0",
-                "joi": "^17.7.0",
-                "winston": "^3.8.0"
+                "@types/bcryptjs": "^2.4.6"
+            })
+        
+        if requirements.get("validation", True):
+            dependencies["joi"] = "^17.11.0"
+        
+        package = {
+            "name": requirements.get("name", "backend-api"),
+            "version": "1.0.0",
+            "description": requirements.get("description", "Backend API"),
+            "main": "dist/server.js",
+            "scripts": {
+                "start": "node dist/server.js",
+                "dev": "ts-node src/server.ts",
+                "build": "tsc",
+                "test": "jest",
+                "lint": "eslint src/**/*.ts"
             },
-            "fastapi": {
-                "fastapi": "^0.88.0",
-                "uvicorn": "^0.20.0",
-                "sqlalchemy": "^1.4.45",
-                "alembic": "^1.8.1",
-                "psycopg2-binary": "^2.9.5",
-                "redis": "^4.4.0",
-                "python-jose": "^3.3.0",
-                "passlib": "^1.7.4",
-                "python-multipart": "^0.0.5",
-                "pydantic": "^1.10.0"
-            },
-            "nestjs": {
-                "@nestjs/core": "^9.0.0",
-                "@nestjs/common": "^9.0.0",
-                "@nestjs/platform-express": "^9.0.0",
-                "@nestjs/typeorm": "^9.0.0",
-                "@nestjs/jwt": "^9.0.0",
-                "@nestjs/passport": "^9.0.0",
-                "typeorm": "^0.3.0",
-                "pg": "^8.8.0",
-                "redis": "^4.5.0",
-                "bcryptjs": "^2.4.3",
-                "passport-jwt": "^4.0.0",
-                "class-validator": "^0.13.0",
-                "class-transformer": "^0.5.0"
+            "dependencies": dependencies,
+            "devDependencies": {
+                "@types/node": "^20.10.4",
+                "jest": "^29.7.0",
+                "@types/jest": "^29.5.8",
+                "ts-jest": "^29.1.1",
+                "eslint": "^8.55.0",
+                "@typescript-eslint/eslint-plugin": "^6.13.1",
+                "@typescript-eslint/parser": "^6.13.1",
+                "nodemon": "^3.0.2"
             }
         }
         
-        return dependencies.get(framework, {})
+        return json.dumps(package, indent=2)
     
-    async def _generate_authentication_system(self, framework: str) -> Dict[str, Any]:
-        """Generate authentication system"""
-        auth_files = {}
-        
-        if framework == "express":
-            auth_files["auth.middleware.ts"] = self._generate_express_auth_middleware()
-            auth_files["auth.controller.ts"] = self._generate_express_auth_controller()
-            auth_files["auth.service.ts"] = self._generate_express_auth_service()
-        elif framework == "fastapi":
-            auth_files["auth.py"] = self._generate_fastapi_auth()
-        elif framework == "nestjs":
-            auth_files["auth.module.ts"] = self._generate_nestjs_auth_module()
-            auth_files["auth.service.ts"] = self._generate_nestjs_auth_service()
-            auth_files["jwt.strategy.ts"] = self._generate_nestjs_jwt_strategy()
-        
-        return auth_files
-    
-    def _generate_express_auth_middleware(self) -> str:
-        """Generate Express.js authentication middleware"""
-        return """
-import jwt from 'jsonwebtoken';
-import { Request, Response, NextFunction } from 'express';
+    def _generate_express_app_file(self, requirements: Dict[str, Any]) -> str:
+        """Generate main Express app file"""
+        return '''import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import dotenv from 'dotenv';
 
-export interface AuthenticatedRequest extends Request {
-  user?: any;
-}
+dotenv.config();
 
-export const authenticateToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+const app = express();
 
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
+// Security middleware
+app.use(helmet());
+app.use(cors());
+app.use(compression());
 
-  jwt.verify(token, process.env.JWT_SECRET as string, (err: any, user: any) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
-    }
-    req.user = user;
-    next();
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
   });
-};
+});
 
-export const authorize = (roles: string[]) => {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
+// API routes
+app.use('/api', (req, res) => {
+  res.json({ message: 'API is running' });
+});
 
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Insufficient permissions' });
-    }
+// Error handling middleware
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error(err.stack);
+  res.status(500).json({ 
+    error: 'Something went wrong!',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+  });
+});
 
-    next();
-  };
-};
-"""
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+export default app;'''
     
-    async def _generate_tests(self, framework: str, endpoints: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate comprehensive test suite"""
-        tests = {}
+    async def _calculate_backend_quality_score(self, api_endpoints: List[Dict], database_models: List[Dict], tests: List[Dict]) -> float:
+        """Calculate quality score for backend implementation"""
+        score = 0.0
+        max_score = 100.0
         
-        if framework == "express":
-            tests["auth.test.ts"] = self._generate_express_auth_tests()
-            tests["integration.test.ts"] = self._generate_express_integration_tests()
-        elif framework == "fastapi":
-            tests["test_auth.py"] = self._generate_fastapi_auth_tests()
-            tests["test_main.py"] = self._generate_fastapi_integration_tests()
+        # API endpoints quality (40 points)
+        if api_endpoints:
+            endpoint_score = min(40, len(api_endpoints) * 5)
+            score += endpoint_score
         
-        return tests
+        # Database models quality (30 points)
+        if database_models:
+            model_score = min(30, len(database_models) * 6)
+            score += model_score
+        
+        # Test coverage (30 points)
+        if tests:
+            test_score = min(30, len(tests) * 5)
+            score += test_score
+        
+        return min(100.0, (score / max_score) * 100)
     
-    async def _generate_configuration_files(self, framework: str, context: AgentExecutionContext) -> Dict[str, Any]:
-        """Generate configuration files"""
-        config_files = {}
-        
-        if framework == "express":
-            config_files["database.ts"] = self._generate_database_config()
-            config_files["redis.ts"] = self._generate_redis_config()
-            config_files["logger.ts"] = self._generate_logger_config()
-        
-        return config_files
+    # Additional helper methods would be implemented here...
+    def _generate_encore_service_file(self, service_name: str) -> str:
+        return f'''import {{ Service }} from "encore.dev/service";
+
+export default new Service("{service_name}");'''
     
-    async def _generate_deployment_config(self, framework: str) -> Dict[str, Any]:
-        """Generate deployment configuration"""
-        return {
-            "dockerfile": self._generate_dockerfile(framework),
-            "docker_compose": self._generate_docker_compose(framework),
-            "kubernetes": self._generate_kubernetes_manifests(framework),
-            "env_vars": self._generate_environment_variables(framework)
-        }
+    def _generate_encore_types(self, service_name: str, requirements: Dict[str, Any]) -> str:
+        return f'''// Type definitions for {service_name} service
+
+export interface {service_name.capitalize()}Request {{
+  // Add request types here
+}}
+
+export interface {service_name.capitalize()}Response {{
+  // Add response types here
+}}'''
+    
+    def _get_service_endpoints(self, service: str, requirements: Dict[str, Any]) -> List[Dict]:
+        """Get endpoints for a service based on requirements"""
+        if service == "users":
+            return [
+                {"name": "create", "description": "Create user"},
+                {"name": "get", "description": "Get user"},
+                {"name": "list", "description": "List users"},
+                {"name": "update", "description": "Update user"},
+                {"name": "delete", "description": "Delete user"}
+            ]
+        elif service == "projects":
+            return [
+                {"name": "create", "description": "Create project"},
+                {"name": "get", "description": "Get project"},
+                {"name": "list", "description": "List projects"},
+                {"name": "update", "description": "Update project"},
+                {"name": "delete", "description": "Delete project"}
+            ]
+        else:
+            return [
+                {"name": "main", "description": "Main endpoint"}
+            ]
+    
+    def _generate_encore_endpoint(self, endpoint: Dict, service: str) -> str:
+        endpoint_name = endpoint["name"]
+        description = endpoint["description"]
+        
+        return f'''import {{ api }} from "encore.dev/api";
+
+interface {endpoint_name.capitalize()}Request {{
+  // Add request interface here
+}}
+
+interface {endpoint_name.capitalize()}Response {{
+  // Add response interface here
+}}
+
+// {description}
+export const {endpoint_name} = api<{endpoint_name.capitalize()}Request, {endpoint_name.capitalize()}Response>(
+  {{ method: "POST", path: "/{service}/{endpoint_name}", expose: true }},
+  async (req) => {{
+    // Implementation here
+    return {{}};
+  }}
+);'''
+    
+    # Placeholder methods for other framework structures
+    async def _generate_fastapi_structure(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
+        return {"directories": [], "files": []}
+    
+    async def _generate_generic_structure(self, framework: str, requirements: Dict[str, Any]) -> Dict[str, Any]:
+        return {"directories": [], "files": []}
+    
+    async def _generate_api_endpoints(self, requirements: Dict[str, Any], framework: str) -> List[Dict]:
+        return []
+    
+    async def _generate_database_models(self, requirements: Dict[str, Any]) -> List[Dict]:
+        return []
+    
+    async def _generate_auth_system(self, framework: str, requirements: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+    
+    async def _generate_middleware(self, framework: str, requirements: Dict[str, Any]) -> List[Dict]:
+        return []
+    
+    async def _generate_backend_tests(self, framework: str, api_endpoints: List[Dict]) -> List[Dict]:
+        return []
+    
+    async def _generate_backend_config(self, framework: str, requirements: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+    
+    def _generate_express_server_file(self) -> str:
+        return "// Express server file"
+    
+    def _generate_typescript_config(self) -> str:
+        return "{}"
+    
+    def _generate_env_template(self, requirements: Dict[str, Any]) -> str:
+        return "# Environment variables"
+    
+    def _generate_database_connection(self) -> str:
+        return "// Database connection"
+    
+    def _generate_auth_middleware(self) -> str:
+        return "// Auth middleware"

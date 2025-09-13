@@ -1,30 +1,17 @@
-export interface DeploymentProvider {
-  id: string;
-  name: string;
-  displayName: string;
-  type: ProviderType;
-  configSchema: Record<string, any>;
-  enabled: boolean;
-  createdAt: Date;
-}
-
-export type ProviderType = 'static' | 'container' | 'serverless' | 'edge';
-
 export interface Deployment {
   id: string;
   projectId: string;
-  providerId: string;
   name: string;
+  provider: string;
   environment: string;
+  configuration: Record<string, any>;
   status: DeploymentStatus;
-  config: Record<string, any>;
+  url?: string;
   buildLogs?: string;
   deployLogs?: string;
-  url?: string;
-  lastDeployedAt?: Date;
-  userId: string;
   createdAt: Date;
   updatedAt: Date;
+  deployedAt?: Date;
 }
 
 export type DeploymentStatus = 
@@ -35,36 +22,30 @@ export type DeploymentStatus =
   | 'failed'
   | 'cancelled';
 
-export interface DeploymentHistory {
+export interface CreateDeploymentRequest {
+  projectId: string;
+  name: string;
+  provider: string;
+  environment: string;
+  configuration: {
+    region?: string;
+    instanceType?: string;
+    scaling?: {
+      min: number;
+      max: number;
+    };
+    environment?: Record<string, string>;
+    domains?: string[];
+    ssl?: boolean;
+  };
+}
+
+export interface DeploymentProvider {
   id: string;
-  deploymentId: string;
-  version: string;
-  status: DeploymentStatus;
-  commitSha?: string;
-  buildLogs?: string;
-  deployLogs?: string;
-  url?: string;
-  deployedBy: string;
-  deployedAt: Date;
-  rollbackTo?: string;
-}
-
-export interface DeploymentConfig {
-  buildCommand?: string;
-  outputDirectory?: string;
-  environmentVariables?: Record<string, string>;
-  customDomain?: string;
-  redirects?: Redirect[];
-  headers?: Header[];
-}
-
-export interface Redirect {
-  source: string;
-  destination: string;
-  permanent: boolean;
-}
-
-export interface Header {
-  source: string;
-  headers: Record<string, string>;
+  name: string;
+  description: string;
+  icon: string;
+  supportedTypes: string[];
+  features: string[];
+  regions: string[];
 }

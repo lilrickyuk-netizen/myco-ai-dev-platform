@@ -1,115 +1,143 @@
+export interface OrchestrationRequest {
+  projectId: string;
+  requirements: {
+    description: string;
+    features: string[];
+    constraints?: string[];
+    performance?: string[];
+    security?: string[];
+  };
+  techStack: {
+    frontend?: string;
+    backend?: string;
+    database?: string;
+    deployment?: string;
+    language?: string;
+    framework?: string;
+  };
+  configuration?: {
+    environment?: string;
+    resources?: Record<string, any>;
+    scaling?: Record<string, any>;
+  };
+}
+
+export interface OrchestrationResponse {
+  orchestrationId: string;
+  status: AgentTaskStatus;
+  message: string;
+  estimatedCompletionTime: Date;
+}
+
+export interface OrchestrationStatus {
+  orchestrationId: string;
+  projectId: string;
+  projectName?: string;
+  status: AgentTaskStatus;
+  statusMessage?: string;
+  progressPercentage?: number;
+  currentPhase?: string;
+  estimatedCompletion?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  activeTasks?: AgentTask[];
+}
+
+export interface AgentTask {
+  id: string;
+  agentType: string;
+  taskType: string;
+  description: string;
+  status: AgentTaskStatus;
+  progressPercentage?: number;
+  startedAt?: Date;
+  completedAt?: Date;
+}
+
+export type AgentTaskStatus = 
+  | 'initializing'
+  | 'planning'
+  | 'architecture'
+  | 'development'
+  | 'integration'
+  | 'testing'
+  | 'security'
+  | 'deployment'
+  | 'verification'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
 export interface AgentSession {
   id: string;
   projectId: string;
   userId: string;
-  type: SessionType;
-  status: SessionStatus;
-  request: Record<string, any>;
-  response?: Record<string, any>;
-  progress: SessionProgress;
-  errorMessage?: string;
+  status: AgentSessionStatus;
+  agents: Agent[];
+  tasks: AgentTask[];
   startedAt: Date;
   completedAt?: Date;
-  updatedAt: Date;
+  configuration: Record<string, any>;
+  results?: Record<string, any>;
 }
 
-export type SessionType = 
-  | 'project_generation'
-  | 'code_review'
-  | 'optimization'
-  | 'debugging'
-  | 'documentation'
-  | 'testing'
-  | 'deployment'
-  | 'security_scan';
-
-export type SessionStatus = 
-  | 'pending'
+export type AgentSessionStatus = 
+  | 'created'
   | 'running'
   | 'completed'
   | 'failed'
   | 'cancelled';
 
-export interface SessionProgress {
-  totalTasks: number;
-  completedTasks: number;
-  currentAgent?: string;
-  currentTask?: string;
-  percentage: number;
-  estimatedTimeRemaining?: number;
-}
-
-export interface AgentTask {
-  id: string;
-  sessionId: string;
-  agentName: string;
-  taskType: string;
-  status: TaskStatus;
-  input: Record<string, any>;
-  output?: Record<string, any>;
-  dependencies: string[];
-  progress: number;
-  errorMessage?: string;
-  startedAt?: Date;
-  completedAt?: Date;
-  createdAt: Date;
-}
-
-export type TaskStatus = 
-  | 'pending'
-  | 'waiting'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'skipped';
-
-export interface AgentLog {
-  id: string;
-  sessionId: string;
-  taskId?: string;
-  level: LogLevel;
-  message: string;
-  metadata: Record<string, any>;
-  timestamp: Date;
-}
-
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-
-export interface AgentArtifact {
-  id: string;
-  sessionId: string;
-  taskId?: string;
-  name: string;
-  type: ArtifactType;
-  content: string;
-  metadata: Record<string, any>;
-  createdAt: Date;
-}
-
-export type ArtifactType = 
-  | 'file'
-  | 'documentation'
-  | 'test'
-  | 'config'
-  | 'script'
-  | 'report'
-  | 'diagram';
-
 export interface Agent {
+  id: string;
+  type: AgentType;
   name: string;
-  displayName: string;
   description: string;
+  status: AgentStatus;
   capabilities: string[];
-  supportedTaskTypes: string[];
-  dependencies: string[];
-  estimatedDuration: number; // in seconds
+  currentTask?: string;
+  completedTasks: string[];
+  performance: {
+    successRate: number;
+    averageTime: number;
+    totalTasks: number;
+  };
 }
+
+export type AgentType = 
+  | 'orchestrator'
+  | 'planner'
+  | 'architect'
+  | 'backend'
+  | 'frontend'
+  | 'database'
+  | 'infrastructure'
+  | 'security'
+  | 'testing'
+  | 'deployment'
+  | 'verification';
+
+export type AgentStatus = 
+  | 'idle'
+  | 'working'
+  | 'completed'
+  | 'error';
 
 export interface ProjectGenerationRequest {
+  name: string;
   description: string;
-  requirements: string[];
-  constraints?: string[];
-  targetFrameworks?: string[];
-  features?: string[];
-  preferences?: Record<string, any>;
+  templateType: string;
+  templateName: string;
+  requirements: {
+    features: string[];
+    constraints?: string[];
+    performance?: string[];
+    security?: string[];
+  };
+  techStack: {
+    frontend?: string;
+    backend?: string;
+    database?: string;
+    deployment?: string;
+  };
 }

@@ -2,42 +2,17 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { executionDB } from "./db";
 import { projectsDB } from "../projects/db";
-import { ExecutionEnvironment, Runtime } from "./types";
+import { Environment, EnvironmentStatus, CreateEnvironmentRequest, ExecutionResult } from "./types";
 
-export interface CreateEnvironmentRequest {
-  projectId: string;
-  name: string;
-  runtime: string;
-  version: string;
-  cpuLimit?: string;
-  memoryLimit?: string;
-}
-
-export interface ListEnvironmentsParams {
-  projectId: string;
-}
-
-export interface ListEnvironmentsResponse {
-  environments: ExecutionEnvironment[];
-}
-
-export interface GetEnvironmentParams {
-  id: string;
-}
-
-export interface ListRuntimesResponse {
-  runtimes: Runtime[];
-}
-
-// Creates a new execution environment.
-export const createEnvironment = api<CreateEnvironmentRequest, ExecutionEnvironment>(
+// Creates a new execution environment for a project.
+export const createEnvironment = api<CreateEnvironmentRequest, Environment>(
   { auth: true, expose: true, method: "POST", path: "/execution/environments" },
   async (req) => {
     const auth = getAuthData()!;
 
-    // Verify user has access to the project
+    // Verify project exists and belongs to user
     const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
+      SELECT id, name FROM projects 
       WHERE id = ${req.projectId} AND user_id = ${auth.userID}
     `;
 
@@ -45,43 +20,19 @@ export const createEnvironment = api<CreateEnvironmentRequest, ExecutionEnvironm
       throw APIError.notFound("Project not found");
     }
 
-    // Check if environment name already exists for this project
-    const existing = await executionDB.queryRow`
-      SELECT id FROM execution_environments 
-      WHERE project_id = ${req.projectId} AND name = ${req.name}
-    `;
-
-    if (existing) {
-      throw APIError.alreadyExists("Environment with this name already exists");
-    }
-
-    // Create the environment
-    const environment = await executionDB.queryRow<ExecutionEnvironment>`
-      INSERT INTO execution_environments (
-        project_id, name, runtime, version, cpu_limit, memory_limit, user_id, status
-      )
-      VALUES (
-        ${req.projectId}, 
-        ${req.name}, 
-        ${req.runtime}, 
-        ${req.version}, 
-        ${req.cpuLimit || '1'}, 
-        ${req.memoryLimit || '512Mi'}, 
-        ${auth.userID},
-        'creating'
-      )
+    const environment = await executionDB.queryRow<Environment>`
+      INSERT INTO environments (project_id, name, type, configuration, status, user_id)
+      VALUES (${req.projectId}, ${req.name}, ${req.type}, ${JSON.stringify(req.configuration)}, 'creating', ${auth.userID})
       RETURNING 
         id,
         project_id as "projectId",
         name,
-        runtime,
-        version,
+        type,
+        configuration,
         status,
         container_id as "containerId",
         port,
-        cpu_limit as "cpuLimit",
-        memory_limit as "memoryLimit",
-        user_id as "userId",
+        url,
         created_at as "createdAt",
         updated_at as "updatedAt"
     `;
@@ -90,20 +41,64 @@ export const createEnvironment = api<CreateEnvironmentRequest, ExecutionEnvironm
       throw APIError.internal("Failed to create environment");
     }
 
-    // TODO: Start container creation process asynchronously
-    startEnvironmentCreation(environment.id);
+    // Start environment creation process
+    startEnvironmentCreation(environment.id, req);
 
     return environment;
   }
 );
 
+export interface GetEnvironmentParams {
+  id: string;
+}
+
+// Gets an execution environment by ID.
+export const getEnvironment = api<GetEnvironmentParams, Environment>(
+  { auth: true, expose: true, method: "GET", path: "/execution/environments/:id" },
+  async ({ id }) => {
+    const auth = getAuthData()!;
+
+    const environment = await executionDB.queryRow<Environment>`
+      SELECT 
+        e.id,
+        e.project_id as "projectId",
+        e.name,
+        e.type,
+        e.configuration,
+        e.status,
+        e.container_id as "containerId",
+        e.port,
+        e.url,
+        e.created_at as "createdAt",
+        e.updated_at as "updatedAt"
+      FROM environments e
+      JOIN projects p ON e.project_id = p.id
+      WHERE e.id = ${id} AND p.user_id = ${auth.userID}
+    `;
+
+    if (!environment) {
+      throw APIError.notFound("Environment not found");
+    }
+
+    return environment;
+  }
+);
+
+export interface ListEnvironmentsParams {
+  projectId: string;
+}
+
+export interface ListEnvironmentsResponse {
+  environments: Environment[];
+}
+
 // Lists all environments for a project.
 export const listEnvironments = api<ListEnvironmentsParams, ListEnvironmentsResponse>(
-  { auth: true, expose: true, method: "GET", path: "/execution/environments/:projectId" },
+  { auth: true, expose: true, method: "GET", path: "/execution/environments/project/:projectId" },
   async ({ projectId }) => {
     const auth = getAuthData()!;
 
-    // Verify user has access to the project
+    // Verify project access
     const project = await projectsDB.queryRow`
       SELECT id FROM projects 
       WHERE id = ${projectId} AND user_id = ${auth.userID}
@@ -113,144 +108,106 @@ export const listEnvironments = api<ListEnvironmentsParams, ListEnvironmentsResp
       throw APIError.notFound("Project not found");
     }
 
-    const environments: ExecutionEnvironment[] = [];
-    
-    for await (const row of executionDB.query<ExecutionEnvironment>`
+    const environments = [];
+    for await (const env of executionDB.query<Environment>`
       SELECT 
         id,
         project_id as "projectId",
         name,
-        runtime,
-        version,
+        type,
+        configuration,
         status,
         container_id as "containerId",
         port,
-        cpu_limit as "cpuLimit",
-        memory_limit as "memoryLimit",
-        user_id as "userId",
+        url,
         created_at as "createdAt",
         updated_at as "updatedAt"
-      FROM execution_environments 
+      FROM environments
       WHERE project_id = ${projectId}
       ORDER BY created_at DESC
     `) {
-      environments.push(row);
+      environments.push(env);
     }
 
     return { environments };
   }
 );
 
-// Gets a specific environment by ID.
-export const getEnvironment = api<GetEnvironmentParams, ExecutionEnvironment>(
-  { auth: true, expose: true, method: "GET", path: "/execution/environments/env/:id" },
-  async ({ id }) => {
+export interface ExecuteCodeRequest {
+  environmentId: string;
+  code: string;
+  language: string;
+  fileName?: string;
+}
+
+// Executes code in a sandboxed environment.
+export const executeCode = api<ExecuteCodeRequest, ExecutionResult>(
+  { auth: true, expose: true, method: "POST", path: "/execution/execute" },
+  async (req) => {
     const auth = getAuthData()!;
 
-    const environment = await executionDB.queryRow<ExecutionEnvironment>`
-      SELECT 
-        id,
-        project_id as "projectId",
-        name,
-        runtime,
-        version,
-        status,
-        container_id as "containerId",
-        port,
-        cpu_limit as "cpuLimit",
-        memory_limit as "memoryLimit",
-        user_id as "userId",
-        created_at as "createdAt",
-        updated_at as "updatedAt"
-      FROM execution_environments 
-      WHERE id = ${id}
+    // Verify environment access
+    const environment = await executionDB.queryRow`
+      SELECT e.id, e.container_id, e.status
+      FROM environments e
+      JOIN projects p ON e.project_id = p.id
+      WHERE e.id = ${req.environmentId} AND p.user_id = ${auth.userID}
     `;
 
     if (!environment) {
       throw APIError.notFound("Environment not found");
     }
 
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${environment.projectId} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
+    if (environment.status !== 'running') {
+      throw APIError.invalidArgument("Environment is not running");
     }
 
-    return environment;
-  }
-);
+    // Execute code in the container
+    const result = await executeInContainer(environment.containerId, req.code, req.language, req.fileName);
 
-// Lists available runtimes.
-export const listRuntimes = api<void, ListRuntimesResponse>(
-  { auth: true, expose: true, method: "GET", path: "/execution/runtimes" },
-  async () => {
-    const runtimes: Runtime[] = [
-      {
-        name: "node",
-        displayName: "Node.js",
-        versions: ["18", "20", "21"],
-        dockerImage: "node",
-        defaultCommand: "npm start",
-        packageManager: "npm",
-        installCommand: "npm install",
-        runCommand: "npm start",
-        buildCommand: "npm run build",
-        extensions: [".js", ".ts", ".jsx", ".tsx"]
-      },
-      {
-        name: "python",
-        displayName: "Python",
-        versions: ["3.9", "3.10", "3.11", "3.12"],
-        dockerImage: "python",
-        defaultCommand: "python main.py",
-        packageManager: "pip",
-        installCommand: "pip install -r requirements.txt",
-        runCommand: "python main.py",
-        extensions: [".py"]
-      },
-      {
-        name: "go",
-        displayName: "Go",
-        versions: ["1.19", "1.20", "1.21"],
-        dockerImage: "golang",
-        defaultCommand: "go run main.go",
-        packageManager: "go",
-        installCommand: "go mod download",
-        runCommand: "go run .",
-        buildCommand: "go build",
-        extensions: [".go"]
-      },
-      {
-        name: "rust",
-        displayName: "Rust",
-        versions: ["1.70", "1.71", "1.72"],
-        dockerImage: "rust",
-        defaultCommand: "cargo run",
-        packageManager: "cargo",
-        installCommand: "cargo fetch",
-        runCommand: "cargo run",
-        buildCommand: "cargo build",
-        extensions: [".rs"]
-      }
-    ];
-
-    return { runtimes };
-  }
-);
-
-// Helper function to start environment creation (would be implemented with actual container orchestration)
-async function startEnvironmentCreation(environmentId: string) {
-  // This would integrate with Docker or Kubernetes to create the actual environment
-  // For now, we'll just update the status to ready after a delay
-  setTimeout(async () => {
+    // Log execution
     await executionDB.exec`
-      UPDATE execution_environments 
-      SET status = 'ready', updated_at = NOW()
+      INSERT INTO executions (environment_id, code, language, output, exit_code, executed_at)
+      VALUES (${req.environmentId}, ${req.code}, ${req.language}, ${result.output}, ${result.exitCode}, NOW())
+    `;
+
+    return result;
+  }
+);
+
+async function startEnvironmentCreation(environmentId: string, req: CreateEnvironmentRequest) {
+  // Simulate environment creation
+  setTimeout(async () => {
+    const containerId = `container_${environmentId}_${Date.now()}`;
+    const port = 3000 + Math.floor(Math.random() * 1000);
+    const url = `http://localhost:${port}`;
+
+    await executionDB.exec`
+      UPDATE environments 
+      SET 
+        status = 'running',
+        container_id = ${containerId},
+        port = ${port},
+        url = ${url},
+        updated_at = NOW()
       WHERE id = ${environmentId}
     `;
   }, 5000);
+}
+
+async function executeInContainer(containerId: string, code: string, language: string, fileName?: string): Promise<ExecutionResult> {
+  // Mock execution - would integrate with Docker API
+  const startTime = Date.now();
+  
+  // Simulate execution delay
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  const endTime = Date.now();
+  
+  return {
+    output: `Executed ${language} code in container ${containerId}\n\nCode:\n${code}\n\nOutput:\nHello World!`,
+    exitCode: 0,
+    executionTimeMs: endTime - startTime,
+    memoryUsageMB: Math.floor(Math.random() * 100) + 10,
+  };
 }

@@ -34,3 +34,15 @@ export interface FileTree {
   sizeBytes: number;
   updatedAt: Date;
 }
+
+export interface Template {
+  type: string;
+  name: string;
+  displayName: string;
+  description: string;
+  icon: string;
+  tags: string[];
+  framework: string;
+  language: string;
+  features: string[];
+}

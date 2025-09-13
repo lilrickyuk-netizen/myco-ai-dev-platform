@@ -1,142 +1,111 @@
-import { api, StreamOut } from "encore.dev/api";
+import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { agentsDB } from "./db";
 import { projectsDB } from "../projects/db";
-import { AgentLog } from "./types";
+import { OrchestrationStatus } from "./types";
 
-export interface StatusStreamParams {
-  sessionId: string;
+export interface GetStatusParams {
+  orchestrationId: string;
 }
 
-export interface StatusMessage {
-  type: 'progress' | 'log' | 'task_update' | 'completion';
-  data: any;
-  timestamp: Date;
-}
-
-// Streams real-time status updates for an agent session.
-export const statusStream = api.streamOut<StatusStreamParams, StatusMessage>(
-  { auth: true, expose: true, path: "/agents/sessions/:sessionId/status" },
-  async ({ sessionId }, stream) => {
+// Gets the current status of a project orchestration.
+export const getStatus = api<GetStatusParams, OrchestrationStatus>(
+  { auth: true, expose: true, method: "GET", path: "/agents/status/:orchestrationId" },
+  async ({ orchestrationId }) => {
     const auth = getAuthData()!;
 
-    // Verify session exists and user has access
-    const session = await agentsDB.queryRow`
-      SELECT project_id FROM agent_sessions WHERE id = ${sessionId}
+    const orchestration = await agentsDB.queryRow<OrchestrationStatus>`
+      SELECT 
+        o.id as "orchestrationId",
+        o.project_id as "projectId",
+        o.status,
+        o.status_message as "statusMessage",
+        o.progress_percentage as "progressPercentage",
+        o.current_phase as "currentPhase",
+        o.estimated_completion as "estimatedCompletion",
+        o.created_at as "createdAt",
+        o.updated_at as "updatedAt",
+        p.name as "projectName"
+      FROM orchestrations o
+      JOIN projects p ON o.project_id = p.id
+      WHERE o.id = ${orchestrationId} AND o.user_id = ${auth.userID}
     `;
 
-    if (!session) {
-      await stream.send({
-        type: 'log',
-        data: { level: 'error', message: 'Session not found' },
-        timestamp: new Date(),
-      });
-      return;
+    if (!orchestration) {
+      throw APIError.notFound("Orchestration not found");
     }
 
+    // Get active tasks
+    const tasks = [];
+    for await (const task of agentsDB.query`
+      SELECT 
+        id,
+        agent_type as "agentType",
+        task_type as "taskType", 
+        description,
+        status,
+        progress_percentage as "progressPercentage",
+        started_at as "startedAt",
+        completed_at as "completedAt"
+      FROM agent_tasks
+      WHERE orchestration_id = ${orchestrationId}
+      ORDER BY created_at DESC
+    `) {
+      tasks.push(task);
+    }
+
+    return {
+      ...orchestration,
+      activeTasks: tasks,
+    };
+  }
+);
+
+export interface ListOrchestrationParams {
+  projectId: string;
+}
+
+export interface ListOrchestrationsResponse {
+  orchestrations: OrchestrationStatus[];
+}
+
+// Lists all orchestrations for a project.
+export const listOrchestrations = api<ListOrchestrationParams, ListOrchestrationsResponse>(
+  { auth: true, expose: true, method: "GET", path: "/agents/orchestrations/:projectId" },
+  async ({ projectId }) => {
+    const auth = getAuthData()!;
+
+    // Verify user has access to the project
     const project = await projectsDB.queryRow`
       SELECT id FROM projects 
-      WHERE id = ${session.project_id} AND user_id = ${auth.userID}
+      WHERE id = ${projectId} AND user_id = ${auth.userID}
     `;
 
     if (!project) {
-      await stream.send({
-        type: 'log',
-        data: { level: 'error', message: 'Project not found' },
-        timestamp: new Date(),
-      });
-      return;
+      throw APIError.notFound("Project not found");
     }
 
-    // Send initial status
-    const currentSession = await agentsDB.queryRow`
-      SELECT status, progress FROM agent_sessions WHERE id = ${sessionId}
-    `;
-
-    if (currentSession) {
-      await stream.send({
-        type: 'progress',
-        data: {
-          status: currentSession.status,
-          progress: typeof currentSession.progress === 'string' 
-            ? JSON.parse(currentSession.progress) 
-            : currentSession.progress,
-        },
-        timestamp: new Date(),
-      });
-    }
-
-    // Get recent logs
-    const logs: AgentLog[] = [];
-    for await (const row of agentsDB.query<AgentLog>`
+    const orchestrations = [];
+    for await (const row of agentsDB.query<OrchestrationStatus>`
       SELECT 
-        id,
-        session_id as "sessionId",
-        task_id as "taskId",
-        level,
-        message,
-        metadata,
-        timestamp
-      FROM agent_logs 
-      WHERE session_id = ${sessionId}
-      ORDER BY timestamp DESC
-      LIMIT 10
+        o.id as "orchestrationId",
+        o.project_id as "projectId",
+        o.status,
+        o.status_message as "statusMessage",
+        o.progress_percentage as "progressPercentage", 
+        o.current_phase as "currentPhase",
+        o.estimated_completion as "estimatedCompletion",
+        o.created_at as "createdAt",
+        o.updated_at as "updatedAt",
+        p.name as "projectName"
+      FROM orchestrations o
+      JOIN projects p ON o.project_id = p.id
+      WHERE o.project_id = ${projectId} AND o.user_id = ${auth.userID}
+      ORDER BY o.created_at DESC
     `) {
-      logs.push({
-        ...row,
-        metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
-      });
+      orchestrations.push(row);
     }
 
-    // Send recent logs
-    for (const log of logs.reverse()) {
-      await stream.send({
-        type: 'log',
-        data: log,
-        timestamp: log.timestamp,
-      });
-    }
-
-    // Simulate real-time updates (in a real implementation, this would listen to database changes or message queues)
-    const interval = setInterval(async () => {
-      try {
-        // Check for session completion
-        const sessionStatus = await agentsDB.queryRow`
-          SELECT status, progress FROM agent_sessions WHERE id = ${sessionId}
-        `;
-
-        if (sessionStatus) {
-          await stream.send({
-            type: 'progress',
-            data: {
-              status: sessionStatus.status,
-              progress: typeof sessionStatus.progress === 'string' 
-                ? JSON.parse(sessionStatus.progress) 
-                : sessionStatus.progress,
-            },
-            timestamp: new Date(),
-          });
-
-          if (sessionStatus.status === 'completed' || sessionStatus.status === 'failed') {
-            await stream.send({
-              type: 'completion',
-              data: { status: sessionStatus.status },
-              timestamp: new Date(),
-            });
-            clearInterval(interval);
-            await stream.close();
-          }
-        }
-      } catch (error) {
-        console.error('Status stream error:', error);
-        clearInterval(interval);
-        await stream.close();
-      }
-    }, 2000); // Check every 2 seconds
-
-    // Clean up on stream close
-    stream.onClose(() => {
-      clearInterval(interval);
-    });
+    return { orchestrations };
   }
 );

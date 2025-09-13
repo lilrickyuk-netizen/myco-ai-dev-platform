@@ -1,67 +1,55 @@
-export interface ExecutionEnvironment {
+export interface Environment {
   id: string;
   projectId: string;
   name: string;
-  runtime: string;
-  version: string;
+  type: EnvironmentType;
+  configuration: Record<string, any>;
   status: EnvironmentStatus;
   containerId?: string;
   port?: number;
-  cpuLimit: string;
-  memoryLimit: string;
-  userId: string;
+  url?: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
+export type EnvironmentType = 
+  | 'nodejs'
+  | 'python'
+  | 'java'
+  | 'go'
+  | 'rust'
+  | 'php'
+  | 'ruby'
+  | 'docker'
+  | 'custom';
+
 export type EnvironmentStatus = 
   | 'creating'
-  | 'ready'
   | 'running'
   | 'stopped'
   | 'error'
-  | 'destroyed';
+  | 'deleting';
 
-export interface ExecutionSession {
-  id: string;
-  environmentId: string;
-  command: string;
-  status: SessionStatus;
-  exitCode?: number;
-  output?: string;
-  errorOutput?: string;
-  userId: string;
-  startedAt: Date;
-  completedAt?: Date;
-}
-
-export type SessionStatus = 
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
-export interface ExecutionLog {
-  id: string;
-  sessionId: string;
-  timestamp: Date;
-  level: LogLevel;
-  message: string;
-  source: LogSource;
-}
-
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-export type LogSource = 'stdout' | 'stderr' | 'system';
-
-export interface Runtime {
+export interface CreateEnvironmentRequest {
+  projectId: string;
   name: string;
-  displayName: string;
-  versions: string[];
-  dockerImage: string;
-  defaultCommand: string;
-  packageManager?: string;
-  installCommand?: string;
-  runCommand?: string;
-  buildCommand?: string;
-  extensions: string[];
+  type: EnvironmentType;
+  configuration: {
+    image?: string;
+    runtime?: string;
+    version?: string;
+    memory?: string;
+    cpu?: number;
+    environment?: Record<string, string>;
+    volumes?: Array<{ host: string; container: string }>;
+    ports?: Array<{ host: number; container: number }>;
+  };
+}
+
+export interface ExecutionResult {
+  output: string;
+  exitCode: number;
+  executionTimeMs: number;
+  memoryUsageMB: number;
+  error?: string;
 }

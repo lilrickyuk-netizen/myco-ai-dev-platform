@@ -2,15 +2,102 @@ import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
 import { deploymentDB } from "./db";
 import { projectsDB } from "../projects/db";
-import { Deployment, DeploymentProvider, DeploymentHistory } from "./types";
+import { Deployment, DeploymentStatus, CreateDeploymentRequest, DeploymentProvider } from "./types";
 
-export interface CreateDeploymentRequest {
-  projectId: string;
-  providerId: string;
-  name: string;
-  environment?: string;
-  config: Record<string, any>;
+// Creates a new deployment for a project.
+export const createDeployment = api<CreateDeploymentRequest, Deployment>(
+  { auth: true, expose: true, method: "POST", path: "/deployment/deploy" },
+  async (req) => {
+    const auth = getAuthData()!;
+
+    // Verify project exists and belongs to user
+    const project = await projectsDB.queryRow`
+      SELECT id, name, status FROM projects 
+      WHERE id = ${req.projectId} AND user_id = ${auth.userID}
+    `;
+
+    if (!project) {
+      throw APIError.notFound("Project not found");
+    }
+
+    if (project.status !== 'ready') {
+      throw APIError.invalidArgument("Project must be in ready state to deploy");
+    }
+
+    const deployment = await deploymentDB.queryRow<Deployment>`
+      INSERT INTO deployments (project_id, name, provider, environment, configuration, status, user_id)
+      VALUES (${req.projectId}, ${req.name}, ${req.provider}, ${req.environment}, ${JSON.stringify(req.configuration)}, 'pending', ${auth.userID})
+      RETURNING 
+        id,
+        project_id as "projectId",
+        name,
+        provider,
+        environment,
+        configuration,
+        status,
+        url,
+        build_logs as "buildLogs",
+        deploy_logs as "deployLogs",
+        created_at as "createdAt",
+        updated_at as "updatedAt",
+        deployed_at as "deployedAt"
+    `;
+
+    if (!deployment) {
+      throw APIError.internal("Failed to create deployment");
+    }
+
+    // Start deployment process
+    startDeploymentProcess(deployment.id, req);
+
+    // Update project status
+    await projectsDB.exec`
+      UPDATE projects 
+      SET status = 'deploying', updated_at = NOW()
+      WHERE id = ${req.projectId}
+    `;
+
+    return deployment;
+  }
+);
+
+export interface GetDeploymentParams {
+  id: string;
 }
+
+// Gets a deployment by ID.
+export const getDeployment = api<GetDeploymentParams, Deployment>(
+  { auth: true, expose: true, method: "GET", path: "/deployment/deployments/:id" },
+  async ({ id }) => {
+    const auth = getAuthData()!;
+
+    const deployment = await deploymentDB.queryRow<Deployment>`
+      SELECT 
+        d.id,
+        d.project_id as "projectId",
+        d.name,
+        d.provider,
+        d.environment,
+        d.configuration,
+        d.status,
+        d.url,
+        d.build_logs as "buildLogs",
+        d.deploy_logs as "deployLogs",
+        d.created_at as "createdAt",
+        d.updated_at as "updatedAt",
+        d.deployed_at as "deployedAt"
+      FROM deployments d
+      JOIN projects p ON d.project_id = p.id
+      WHERE d.id = ${id} AND p.user_id = ${auth.userID}
+    `;
+
+    if (!deployment) {
+      throw APIError.notFound("Deployment not found");
+    }
+
+    return deployment;
+  }
+);
 
 export interface ListDeploymentsParams {
   projectId: string;
@@ -20,110 +107,13 @@ export interface ListDeploymentsResponse {
   deployments: Deployment[];
 }
 
-export interface GetDeploymentParams {
-  id: string;
-}
-
-export interface ListProvidersResponse {
-  providers: DeploymentProvider[];
-}
-
-export interface DeployParams {
-  id: string;
-}
-
-export interface DeployResponse {
-  deployment: Deployment;
-  historyId: string;
-}
-
-// Creates a new deployment configuration.
-export const createDeployment = api<CreateDeploymentRequest, Deployment>(
-  { auth: true, expose: true, method: "POST", path: "/deployment/deployments" },
-  async (req) => {
-    const auth = getAuthData()!;
-
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${req.projectId} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
-    }
-
-    // Verify provider exists
-    const provider = await deploymentDB.queryRow`
-      SELECT id FROM deployment_providers 
-      WHERE id = ${req.providerId} AND enabled = TRUE
-    `;
-
-    if (!provider) {
-      throw APIError.notFound("Provider not found or disabled");
-    }
-
-    // Check if deployment name already exists for this project/environment
-    const existing = await deploymentDB.queryRow`
-      SELECT id FROM deployments 
-      WHERE project_id = ${req.projectId} 
-      AND name = ${req.name} 
-      AND environment = ${req.environment || 'production'}
-    `;
-
-    if (existing) {
-      throw APIError.alreadyExists("Deployment with this name already exists in this environment");
-    }
-
-    // Create the deployment
-    const deployment = await deploymentDB.queryRow<Deployment>`
-      INSERT INTO deployments (
-        project_id, provider_id, name, environment, config, user_id, status
-      )
-      VALUES (
-        ${req.projectId}, 
-        ${req.providerId}, 
-        ${req.name}, 
-        ${req.environment || 'production'}, 
-        ${JSON.stringify(req.config)}, 
-        ${auth.userID},
-        'pending'
-      )
-      RETURNING 
-        id,
-        project_id as "projectId",
-        provider_id as "providerId",
-        name,
-        environment,
-        status,
-        config,
-        build_logs as "buildLogs",
-        deploy_logs as "deployLogs",
-        url,
-        last_deployed_at as "lastDeployedAt",
-        user_id as "userId",
-        created_at as "createdAt",
-        updated_at as "updatedAt"
-    `;
-
-    if (!deployment) {
-      throw APIError.internal("Failed to create deployment");
-    }
-
-    return {
-      ...deployment,
-      config: typeof deployment.config === 'string' ? JSON.parse(deployment.config) : deployment.config,
-    };
-  }
-);
-
 // Lists all deployments for a project.
 export const listDeployments = api<ListDeploymentsParams, ListDeploymentsResponse>(
-  { auth: true, expose: true, method: "GET", path: "/deployment/deployments/:projectId" },
+  { auth: true, expose: true, method: "GET", path: "/deployment/deployments/project/:projectId" },
   async ({ projectId }) => {
     const auth = getAuthData()!;
 
-    // Verify user has access to the project
+    // Verify project access
     const project = await projectsDB.queryRow`
       SELECT id FROM projects 
       WHERE id = ${projectId} AND user_id = ${auth.userID}
@@ -133,212 +123,161 @@ export const listDeployments = api<ListDeploymentsParams, ListDeploymentsRespons
       throw APIError.notFound("Project not found");
     }
 
-    const deployments: Deployment[] = [];
-    
-    for await (const row of deploymentDB.query<Deployment>`
+    const deployments = [];
+    for await (const deployment of deploymentDB.query<Deployment>`
       SELECT 
         id,
         project_id as "projectId",
-        provider_id as "providerId",
         name,
+        provider,
         environment,
+        configuration,
         status,
-        config,
+        url,
         build_logs as "buildLogs",
         deploy_logs as "deployLogs",
-        url,
-        last_deployed_at as "lastDeployedAt",
-        user_id as "userId",
         created_at as "createdAt",
-        updated_at as "updatedAt"
-      FROM deployments 
+        updated_at as "updatedAt",
+        deployed_at as "deployedAt"
+      FROM deployments
       WHERE project_id = ${projectId}
       ORDER BY created_at DESC
     `) {
-      deployments.push({
-        ...row,
-        config: typeof row.config === 'string' ? JSON.parse(row.config) : row.config,
-      });
+      deployments.push(deployment);
     }
 
     return { deployments };
   }
 );
 
-// Gets a specific deployment by ID.
-export const getDeployment = api<GetDeploymentParams, Deployment>(
-  { auth: true, expose: true, method: "GET", path: "/deployment/deployments/deploy/:id" },
-  async ({ id }) => {
-    const auth = getAuthData()!;
-
-    const deployment = await deploymentDB.queryRow<Deployment>`
-      SELECT 
-        id,
-        project_id as "projectId",
-        provider_id as "providerId",
-        name,
-        environment,
-        status,
-        config,
-        build_logs as "buildLogs",
-        deploy_logs as "deployLogs",
-        url,
-        last_deployed_at as "lastDeployedAt",
-        user_id as "userId",
-        created_at as "createdAt",
-        updated_at as "updatedAt"
-      FROM deployments 
-      WHERE id = ${id}
-    `;
-
-    if (!deployment) {
-      throw APIError.notFound("Deployment not found");
-    }
-
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${deployment.projectId} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
-    }
-
-    return {
-      ...deployment,
-      config: typeof deployment.config === 'string' ? JSON.parse(deployment.config) : deployment.config,
-    };
-  }
-);
-
-// Lists available deployment providers.
-export const listProviders = api<void, ListProvidersResponse>(
-  { auth: true, expose: true, method: "GET", path: "/deployment/providers" },
-  async () => {
-    const providers: DeploymentProvider[] = [];
-    
-    for await (const row of deploymentDB.query<DeploymentProvider>`
-      SELECT 
-        id,
-        name,
-        display_name as "displayName",
-        type,
-        config_schema as "configSchema",
-        enabled,
-        created_at as "createdAt"
-      FROM deployment_providers 
-      WHERE enabled = TRUE
-      ORDER BY display_name ASC
-    `) {
-      providers.push({
-        ...row,
-        configSchema: typeof row.configSchema === 'string' ? JSON.parse(row.configSchema) : row.configSchema,
-      });
-    }
-
-    return { providers };
-  }
-);
-
-// Triggers a new deployment.
-export const deploy = api<DeployParams, DeployResponse>(
-  { auth: true, expose: true, method: "POST", path: "/deployment/deployments/:id/deploy" },
-  async ({ id }) => {
-    const auth = getAuthData()!;
-
-    // Get deployment and verify ownership
-    const deployment = await deploymentDB.queryRow<Deployment>`
-      SELECT 
-        id,
-        project_id as "projectId",
-        provider_id as "providerId",
-        name,
-        environment,
-        status,
-        config,
-        build_logs as "buildLogs",
-        deploy_logs as "deployLogs",
-        url,
-        last_deployed_at as "lastDeployedAt",
-        user_id as "userId",
-        created_at as "createdAt",
-        updated_at as "updatedAt"
-      FROM deployments 
-      WHERE id = ${id}
-    `;
-
-    if (!deployment) {
-      throw APIError.notFound("Deployment not found");
-    }
-
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${deployment.projectId} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
-    }
-
-    // Update deployment status to building
-    await deploymentDB.exec`
-      UPDATE deployments 
-      SET status = 'building', updated_at = NOW()
-      WHERE id = ${id}
-    `;
-
-    // Create deployment history entry
-    const history = await deploymentDB.queryRow<{ id: string }>`
-      INSERT INTO deployment_history (deployment_id, version, status, deployed_by)
-      VALUES (${id}, ${generateVersion()}, 'building', ${auth.userID})
-      RETURNING id
-    `;
-
-    if (!history) {
-      throw APIError.internal("Failed to create deployment history");
-    }
-
-    // Start deployment process asynchronously
-    startDeploymentProcess(id, history.id);
-
-    const updatedDeployment = {
-      ...deployment,
-      status: 'building' as const,
-      config: typeof deployment.config === 'string' ? JSON.parse(deployment.config) : deployment.config,
-    };
-
-    return {
-      deployment: updatedDeployment,
-      historyId: history.id,
-    };
-  }
-);
-
-// Helper function to generate version string
-function generateVersion(): string {
-  const now = new Date();
-  return `v${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}-${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+export interface GetProvidersResponse {
+  providers: DeploymentProvider[];
 }
 
-// Helper function to start deployment process (would integrate with actual deployment services)
-async function startDeploymentProcess(deploymentId: string, historyId: string) {
-  // This would integrate with actual deployment providers
-  // For now, we'll simulate a deployment process
-  setTimeout(async () => {
-    const mockUrl = `https://${deploymentId}.app.example.com`;
-    
-    await deploymentDB.exec`
-      UPDATE deployments 
-      SET status = 'deployed', url = ${mockUrl}, last_deployed_at = NOW(), updated_at = NOW()
-      WHERE id = ${deploymentId}
-    `;
+// Lists all available deployment providers.
+export const getProviders = api<void, GetProvidersResponse>(
+  { auth: true, expose: true, method: "GET", path: "/deployment/providers" },
+  async () => {
+    return {
+      providers: [
+        {
+          id: 'vercel',
+          name: 'Vercel',
+          description: 'Frontend deployment platform with edge computing',
+          icon: 'vercel',
+          supportedTypes: ['web', 'frontend'],
+          features: ['Edge Functions', 'CDN', 'Analytics', 'Preview Deployments'],
+          regions: ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-southeast-1'],
+        },
+        {
+          id: 'netlify',
+          name: 'Netlify',
+          description: 'Modern web development platform',
+          icon: 'netlify',
+          supportedTypes: ['web', 'frontend'],
+          features: ['Forms', 'Functions', 'Identity', 'Split Testing'],
+          regions: ['us-east-1', 'us-west-2', 'eu-west-1'],
+        },
+        {
+          id: 'aws',
+          name: 'Amazon Web Services',
+          description: 'Cloud computing platform',
+          icon: 'aws',
+          supportedTypes: ['web', 'backend', 'fullstack'],
+          features: ['EC2', 'Lambda', 'RDS', 'S3', 'CloudFront'],
+          regions: ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-southeast-1', 'ap-northeast-1'],
+        },
+        {
+          id: 'gcp',
+          name: 'Google Cloud Platform',
+          description: 'Google\'s cloud computing services',
+          icon: 'gcp',
+          supportedTypes: ['web', 'backend', 'fullstack'],
+          features: ['Compute Engine', 'Cloud Functions', 'Cloud SQL', 'Cloud Storage'],
+          regions: ['us-central1', 'us-east1', 'europe-west1', 'asia-southeast1'],
+        },
+        {
+          id: 'railway',
+          name: 'Railway',
+          description: 'Modern app hosting platform',
+          icon: 'railway',
+          supportedTypes: ['backend', 'fullstack'],
+          features: ['Databases', 'One-click deploys', 'GitHub integration'],
+          regions: ['us-west-2', 'eu-west-1'],
+        },
+        {
+          id: 'render',
+          name: 'Render',
+          description: 'Cloud platform for developers',
+          icon: 'render',
+          supportedTypes: ['web', 'backend', 'fullstack'],
+          features: ['Auto-deploy', 'SSL', 'Database hosting', 'Background jobs'],
+          regions: ['us-east-1', 'us-west-2', 'eu-west-1'],
+        },
+      ],
+    };
+  }
+);
 
-    await deploymentDB.exec`
-      UPDATE deployment_history 
-      SET status = 'deployed', url = ${mockUrl}
-      WHERE id = ${historyId}
-    `;
-  }, 10000); // 10 second mock deployment
+async function startDeploymentProcess(deploymentId: string, req: CreateDeploymentRequest) {
+  // Simulate deployment process
+  setTimeout(async () => {
+    // Building phase
+    await updateDeploymentStatus(deploymentId, 'building', 'Building application...');
+    
+    setTimeout(async () => {
+      // Deploying phase
+      await updateDeploymentStatus(deploymentId, 'deploying', 'Deploying to ' + req.provider);
+      
+      setTimeout(async () => {
+        // Success
+        const url = generateDeploymentUrl(req.provider, req.name);
+        await updateDeploymentStatus(deploymentId, 'deployed', 'Deployment completed successfully', url);
+        
+        // Update project with deploy URL
+        await projectsDB.exec`
+          UPDATE projects 
+          SET status = 'deployed', deploy_url = ${url}, updated_at = NOW()
+          WHERE id = ${req.projectId}
+        `;
+      }, 15000);
+    }, 20000);
+  }, 10000);
+}
+
+async function updateDeploymentStatus(deploymentId: string, status: DeploymentStatus, message: string, url?: string) {
+  const updateFields = ['status = $1', 'updated_at = NOW()'];
+  const params = [status];
+  
+  if (url) {
+    updateFields.push('url = $2', 'deployed_at = NOW()');
+    params.push(url);
+  }
+  
+  const query = `
+    UPDATE deployments 
+    SET ${updateFields.join(', ')}
+    WHERE id = $${params.length + 1}
+  `;
+  params.push(deploymentId);
+  
+  await deploymentDB.rawExec(query, ...params);
+}
+
+function generateDeploymentUrl(provider: string, name: string): string {
+  const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  const randomId = Math.random().toString(36).substring(2, 8);
+  
+  switch (provider) {
+    case 'vercel':
+      return `https://${cleanName}-${randomId}.vercel.app`;
+    case 'netlify':
+      return `https://${cleanName}-${randomId}.netlify.app`;
+    case 'railway':
+      return `https://${cleanName}-${randomId}.railway.app`;
+    case 'render':
+      return `https://${cleanName}-${randomId}.onrender.com`;
+    default:
+      return `https://${cleanName}-${randomId}.example.com`;
+  }
 }

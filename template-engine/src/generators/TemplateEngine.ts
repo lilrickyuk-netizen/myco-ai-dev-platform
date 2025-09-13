@@ -1,411 +1,572 @@
-import Handlebars from 'handlebars';
 import { promises as fs } from 'fs';
-import path from 'path';
-import { glob } from 'glob';
+import { join, resolve, dirname, basename } from 'path';
+import { EventEmitter } from 'events';
 
-export interface TemplateConfig {
+export interface TemplateVariable {
   name: string;
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
-  category: string;
-  type: string;
+  default?: any;
+  required?: boolean;
+  validation?: (value: any) => boolean | string;
+}
+
+export interface TemplateFile {
+  path: string;
+  content: string;
+  encoding?: 'utf8' | 'binary';
+  executable?: boolean;
+  template?: boolean;
+}
+
+export interface TemplateMetadata {
+  name: string;
+  displayName: string;
+  description: string;
+  version: string;
+  author: string;
   tags: string[];
-  tech_stack: string[];
-  features: string[];
-  requirements: Record<string, string>;
-  structure: Record<string, any>;
-  files: Record<string, {
-    template: string;
-    variables?: string[];
-  }>;
+  category: string;
+  language: string;
+  framework?: string;
+  variables: TemplateVariable[];
+  dependencies: string[];
   scripts: Record<string, string>;
-  dependencies: Record<string, string>;
-  devDependencies?: Record<string, string>;
-  deployment: {
-    build_command: string;
-    output_directory?: string;
-    start_command?: string;
-    node_version: string;
-    environment_variables: Record<string, string>;
-    providers: Record<string, any>;
+  features: string[];
+  readme?: string;
+}
+
+export interface Template {
+  metadata: TemplateMetadata;
+  files: TemplateFile[];
+  hooks?: {
+    preGenerate?: string;
+    postGenerate?: string;
+    preInstall?: string;
+    postInstall?: string;
   };
-  customization?: Record<string, {
-    type: string;
-    options: string[];
-    default: string;
-  }>;
-  post_generation: string[];
 }
 
 export interface GenerationContext {
-  project_name: string;
-  description: string;
-  author: string;
-  template: string;
-  customizations: Record<string, any>;
-  destination: string;
+  variables: Record<string, any>;
+  projectName: string;
+  projectPath: string;
+  templatePath: string;
+  helpers: Record<string, Function>;
 }
 
-export class TemplateEngine {
+export interface GenerationOptions {
+  outputPath: string;
+  variables: Record<string, any>;
+  overwrite?: boolean;
+  dryRun?: boolean;
+  skipHooks?: boolean;
+  skipInstall?: boolean;
+}
+
+export interface GenerationResult {
+  success: boolean;
+  filesCreated: string[];
+  filesSkipped: string[];
+  errors: string[];
+  warnings: string[];
+  duration: number;
+  template: TemplateMetadata;
+}
+
+export class TemplateEngine extends EventEmitter {
   private templatesPath: string;
-  private templates: Map<string, TemplateConfig> = new Map();
-  
+  private loadedTemplates: Map<string, Template> = new Map();
+  private helpers: Record<string, Function> = {};
+
   constructor(templatesPath: string) {
+    super();
     this.templatesPath = templatesPath;
-    this.registerHelpers();
+    this.registerDefaultHelpers();
   }
 
-  async initialize(): Promise<void> {
-    await this.loadTemplates();
-  }
+  private registerDefaultHelpers(): void {
+    this.helpers = {
+      // String helpers
+      capitalize: (str: string) => str.charAt(0).toUpperCase() + str.slice(1),
+      lowercase: (str: string) => str.toLowerCase(),
+      uppercase: (str: string) => str.toUpperCase(),
+      camelCase: (str: string) => str.replace(/[-_\\s]+(.)/g, (_, char) => char.toUpperCase()),
+      kebabCase: (str: string) => str.replace(/[A-Z]/g, '-$&').toLowerCase().replace(/^-/, ''),
+      snakeCase: (str: string) => str.replace(/[A-Z]/g, '_$&').toLowerCase().replace(/^_/, ''),
+      pascalCase: (str: string) => this.helpers.camelCase(str).charAt(0).toUpperCase() + this.helpers.camelCase(str).slice(1),
 
-  private async loadTemplates(): Promise<void> {
-    const templateDirs = await glob('**/template.json', {
-      cwd: this.templatesPath,
-      absolute: false
-    });
+      // Date helpers
+      currentYear: () => new Date().getFullYear(),
+      currentDate: () => new Date().toISOString().split('T')[0],
+      currentDateTime: () => new Date().toISOString(),
 
-    for (const templateFile of templateDirs) {
-      try {
-        const configPath = path.join(this.templatesPath, templateFile);
-        const configContent = await fs.readFile(configPath, 'utf-8');
-        const config: TemplateConfig = JSON.parse(configContent);
-        
-        const templateKey = path.dirname(templateFile);
-        this.templates.set(templateKey, config);
-        
-        console.log(`Loaded template: ${templateKey} - ${config.name}`);
-      } catch (error) {
-        console.error(`Failed to load template ${templateFile}:`, error);
-      }
-    }
-  }
+      // UUID helper
+      uuid: () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      }),
 
-  private registerHelpers(): void {
-    // Register Handlebars helpers
-    Handlebars.registerHelper('toLowerCase', (str: string) => str.toLowerCase());
-    Handlebars.registerHelper('toUpperCase', (str: string) => str.toUpperCase());
-    Handlebars.registerHelper('toCamelCase', (str: string) => {
-      return str.replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '');
-    });
-    Handlebars.registerHelper('toPascalCase', (str: string) => {
-      const camelCase = str.replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '');
-      return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
-    });
-    Handlebars.registerHelper('toKebabCase', (str: string) => {
-      return str.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`);
-    });
-    Handlebars.registerHelper('toSnakeCase', (str: string) => {
-      return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-    });
-    Handlebars.registerHelper('eq', (a: any, b: any) => a === b);
-    Handlebars.registerHelper('ne', (a: any, b: any) => a !== b);
-    Handlebars.registerHelper('includes', (array: any[], item: any) => array.includes(item));
-    Handlebars.registerHelper('json', (obj: any) => JSON.stringify(obj, null, 2));
-    Handlebars.registerHelper('currentYear', () => new Date().getFullYear());
-    Handlebars.registerHelper('currentDate', () => new Date().toISOString().split('T')[0]);
-  }
+      // Array helpers
+      join: (arr: any[], separator: string = ', ') => arr.join(separator),
+      first: (arr: any[]) => arr[0],
+      last: (arr: any[]) => arr[arr.length - 1],
 
-  getTemplates(): Array<{ key: string; config: TemplateConfig }> {
-    return Array.from(this.templates.entries()).map(([key, config]) => ({
-      key,
-      config
-    }));
-  }
+      // Conditional helpers
+      if: (condition: boolean, trueValue: any, falseValue: any = '') => condition ? trueValue : falseValue,
+      unless: (condition: boolean, falseValue: any, trueValue: any = '') => !condition ? falseValue : trueValue,
 
-  getTemplate(templateKey: string): TemplateConfig | undefined {
-    return this.templates.get(templateKey);
-  }
+      // JSON helper
+      json: (obj: any, indent: number = 2) => JSON.stringify(obj, null, indent),
 
-  getTemplatesByCategory(category: string): Array<{ key: string; config: TemplateConfig }> {
-    return this.getTemplates().filter(({ config }) => config.category === category);
-  }
+      // Path helpers
+      filename: (path: string) => basename(path),
+      dirname: (path: string) => dirname(path),
+      extname: (path: string) => path.split('.').pop() || '',
 
-  getTemplatesByTag(tag: string): Array<{ key: string; config: TemplateConfig }> {
-    return this.getTemplates().filter(({ config }) => config.tags.includes(tag));
-  }
+      // String manipulation
+      replace: (str: string, search: string, replace: string) => str.replace(new RegExp(search, 'g'), replace),
+      trim: (str: string) => str.trim(),
+      split: (str: string, separator: string) => str.split(separator),
 
-  async generateProject(templateKey: string, context: GenerationContext): Promise<void> {
-    const template = this.templates.get(templateKey);
-    if (!template) {
-      throw new Error(`Template not found: ${templateKey}`);
-    }
-
-    console.log(`Generating project from template: ${template.name}`);
-    
-    // Create project directory structure
-    await this.createDirectoryStructure(template.structure, context.destination);
-    
-    // Generate files from templates
-    await this.generateFiles(templateKey, template, context);
-    
-    // Apply customizations
-    await this.applyCustomizations(template, context);
-    
-    // Run post-generation scripts
-    await this.runPostGenerationScripts(template, context);
-    
-    console.log(`Project generated successfully at: ${context.destination}`);
-  }
-
-  private async createDirectoryStructure(
-    structure: Record<string, any>, 
-    basePath: string, 
-    currentPath = ''
-  ): Promise<void> {
-    for (const [name, content] of Object.entries(structure)) {
-      const fullPath = path.join(basePath, currentPath, name);
-      
-      if (typeof content === 'object' && content !== null) {
-        // It's a directory
-        await fs.mkdir(fullPath, { recursive: true });
-        await this.createDirectoryStructure(content, basePath, path.join(currentPath, name));
-      } else {
-        // It's a file (empty content)
-        await fs.mkdir(path.dirname(fullPath), { recursive: true });
-      }
-    }
-  }
-
-  private async generateFiles(
-    templateKey: string, 
-    template: TemplateConfig, 
-    context: GenerationContext
-  ): Promise<void> {
-    const templateDir = path.join(this.templatesPath, templateKey);
-    
-    for (const [filePath, fileConfig] of Object.entries(template.files)) {
-      const templateFile = path.join(templateDir, fileConfig.template);
-      const outputFile = path.join(context.destination, filePath);
-      
-      try {
-        // Read template file
-        const templateContent = await fs.readFile(templateFile, 'utf-8');
-        
-        // Compile template
-        const compiledTemplate = Handlebars.compile(templateContent);
-        
-        // Prepare template variables
-        const templateVars = {
-          ...context,
-          ...context.customizations,
-          features: template.features,
-          tech_stack: template.tech_stack,
-          scripts: template.scripts,
-          dependencies: template.dependencies,
-          devDependencies: template.devDependencies || {}
-        };
-        
-        // Generate content
-        const generatedContent = compiledTemplate(templateVars);
-        
-        // Ensure output directory exists
-        await fs.mkdir(path.dirname(outputFile), { recursive: true });
-        
-        // Write generated file
-        await fs.writeFile(outputFile, generatedContent, 'utf-8');
-        
-        console.log(`Generated: ${filePath}`);
-      } catch (error) {
-        console.error(`Failed to generate file ${filePath}:`, error);
-        throw error;
-      }
-    }
-  }
-
-  private async applyCustomizations(
-    template: TemplateConfig, 
-    context: GenerationContext
-  ): Promise<void> {
-    if (!template.customization) return;
-    
-    for (const [key, customization] of Object.entries(template.customization)) {
-      const value = context.customizations[key];
-      
-      if (value && value !== customization.default) {
-        await this.applyCustomization(key, value, context.destination);
-      }
-    }
-  }
-
-  private async applyCustomization(
-    key: string, 
-    value: any, 
-    projectPath: string
-  ): Promise<void> {
-    // Apply specific customizations based on the key
-    switch (key) {
-      case 'ui_library':
-        await this.addUILibrary(value, projectPath);
-        break;
-      case 'state_management':
-        await this.addStateManagement(value, projectPath);
-        break;
-      case 'testing':
-        await this.addTestingFramework(value, projectPath);
-        break;
-      case 'auth':
-        await this.addAuthProvider(value, projectPath);
-        break;
-      case 'database':
-        await this.configureDatabase(value, projectPath);
-        break;
-      case 'orm':
-        await this.configureORM(value, projectPath);
-        break;
-      default:
-        console.log(`Unknown customization: ${key}`);
-    }
-  }
-
-  private async addUILibrary(library: string, projectPath: string): Promise<void> {
-    // Add UI library specific configurations and dependencies
-    const packageJsonPath = path.join(projectPath, 'package.json');
-    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
-    
-    const uiDependencies: Record<string, Record<string, string>> = {
-      'mui': {
-        '@mui/material': '^5.12.0',
-        '@emotion/react': '^11.10.8',
-        '@emotion/styled': '^11.10.8'
-      },
-      'chakra': {
-        '@chakra-ui/react': '^2.5.5',
-        '@emotion/react': '^11.10.8',
-        '@emotion/styled': '^11.10.8',
-        'framer-motion': '^10.12.4'
-      },
-      'antd': {
-        'antd': '^5.4.0'
-      },
-      'mantine': {
-        '@mantine/core': '^6.0.8',
-        '@mantine/hooks': '^6.0.8'
-      }
+      // Math helpers
+      add: (a: number, b: number) => a + b,
+      subtract: (a: number, b: number) => a - b,
+      multiply: (a: number, b: number) => a * b,
+      divide: (a: number, b: number) => a / b,
     };
-    
-    if (uiDependencies[library]) {
-      packageJson.dependencies = {
-        ...packageJson.dependencies,
-        ...uiDependencies[library]
-      };
-      
-      await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), 'utf-8');
-      console.log(`Added ${library} UI library`);
-    }
   }
 
-  private async addStateManagement(stateLib: string, projectPath: string): Promise<void> {
-    const packageJsonPath = path.join(projectPath, 'package.json');
-    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
+  async loadTemplate(templateName: string): Promise<Template> {
+    if (this.loadedTemplates.has(templateName)) {
+      return this.loadedTemplates.get(templateName)!;
+    }
+
+    const templatePath = join(this.templatesPath, templateName);
     
-    const stateDependencies: Record<string, Record<string, string>> = {
-      'redux': {
-        '@reduxjs/toolkit': '^1.9.3',
-        'react-redux': '^8.0.5'
-      },
-      'zustand': {
-        'zustand': '^4.3.7'
-      },
-      'jotai': {
-        'jotai': '^2.0.3'
-      },
-      'recoil': {
-        'recoil': '^0.7.7'
+    try {
+      // Check if template directory exists
+      const stats = await fs.stat(templatePath);
+      if (!stats.isDirectory()) {
+        throw new Error(`Template ${templateName} is not a directory`);
       }
-    };
-    
-    if (stateDependencies[stateLib]) {
-      packageJson.dependencies = {
-        ...packageJson.dependencies,
-        ...stateDependencies[stateLib]
+
+      // Load template.json
+      const metadataPath = join(templatePath, 'template.json');
+      const metadataContent = await fs.readFile(metadataPath, 'utf8');
+      const metadata: TemplateMetadata = JSON.parse(metadataContent);
+
+      // Load template files
+      const files = await this.loadTemplateFiles(templatePath);
+
+      // Load hooks if they exist
+      const hooks = await this.loadTemplateHooks(templatePath);
+
+      const template: Template = {
+        metadata,
+        files,
+        hooks,
       };
-      
-      await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2), 'utf-8');
-      console.log(`Added ${stateLib} state management`);
+
+      this.loadedTemplates.set(templateName, template);
+      this.emit('templateLoaded', templateName, template);
+
+      return template;
+
+    } catch (error) {
+      throw new Error(`Failed to load template ${templateName}: ${error}`);
     }
   }
 
-  private async addTestingFramework(testing: string[], projectPath: string): Promise<void> {
-    // Add testing framework configurations
-    console.log(`Configuring testing with: ${testing.join(', ')}`);
+  private async loadTemplateFiles(templatePath: string): Promise<TemplateFile[]> {
+    const files: TemplateFile[] = [];
+    const filesPath = join(templatePath, 'files');
+
+    try {
+      await this.scanDirectory(filesPath, '', files);
+    } catch (error) {
+      // Files directory is optional
+      console.warn(`No files directory found in template: ${templatePath}`);
+    }
+
+    return files;
   }
 
-  private async addAuthProvider(auth: string, projectPath: string): Promise<void> {
-    // Add authentication provider configuration
-    console.log(`Configuring authentication with: ${auth}`);
-  }
+  private async scanDirectory(dirPath: string, relativePath: string, files: TemplateFile[]): Promise<void> {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
-  private async configureDatabase(database: string, projectPath: string): Promise<void> {
-    // Configure database specific settings
-    console.log(`Configuring database: ${database}`);
-  }
+    for (const entry of entries) {
+      const fullPath = join(dirPath, entry.name);
+      const relativeFilePath = join(relativePath, entry.name);
 
-  private async configureORM(orm: string, projectPath: string): Promise<void> {
-    // Configure ORM specific settings
-    console.log(`Configuring ORM: ${orm}`);
-  }
+      if (entry.isDirectory()) {
+        await this.scanDirectory(fullPath, relativeFilePath, files);
+      } else if (entry.isFile()) {
+        const content = await fs.readFile(fullPath, 'utf8');
+        const stats = await fs.stat(fullPath);
 
-  private async runPostGenerationScripts(
-    template: TemplateConfig, 
-    context: GenerationContext
-  ): Promise<void> {
-    const { spawn } = await import('child_process');
-    
-    for (const script of template.post_generation) {
-      console.log(`Running: ${script}`);
-      
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const child = spawn(script, [], {
-            cwd: context.destination,
-            shell: true,
-            stdio: 'inherit'
-          });
-          
-          child.on('close', (code) => {
-            if (code === 0) {
-              resolve();
-            } else {
-              reject(new Error(`Script failed with code ${code}: ${script}`));
-            }
-          });
-          
-          child.on('error', reject);
+        files.push({
+          path: relativeFilePath,
+          content,
+          encoding: 'utf8',
+          executable: (stats.mode & parseInt('111', 8)) !== 0,
+          template: this.isTemplateFile(fullPath),
         });
-      } catch (error) {
-        console.error(`Failed to run post-generation script: ${script}`, error);
-        // Continue with other scripts even if one fails
       }
     }
   }
 
-  async validateTemplate(templateKey: string): Promise<{ valid: boolean; errors: string[] }> {
-    const template = this.templates.get(templateKey);
-    if (!template) {
-      return { valid: false, errors: [`Template not found: ${templateKey}`] };
+  private isTemplateFile(filePath: string): boolean {
+    // Files with .template extension or containing template syntax
+    return filePath.endsWith('.template') || this.containsTemplateSyntax(filePath);
+  }
+
+  private containsTemplateSyntax(filePath: string): boolean {
+    // Simple check for common template syntax
+    try {
+      const content = require('fs').readFileSync(filePath, 'utf8');
+      return /\\{\\{.*?\\}\\}/.test(content) || /<%= .*? %>/.test(content);
+    } catch {
+      return false;
     }
-    
+  }
+
+  private async loadTemplateHooks(templatePath: string): Promise<any> {
+    const hooksPath = join(templatePath, 'hooks');
+    const hooks: any = {};
+
+    try {
+      const hookFiles = ['preGenerate.js', 'postGenerate.js', 'preInstall.js', 'postInstall.js'];
+      
+      for (const hookFile of hookFiles) {
+        const hookPath = join(hooksPath, hookFile);
+        try {
+          await fs.access(hookPath);
+          const hookName = hookFile.replace('.js', '');
+          hooks[hookName] = hookPath;
+        } catch {
+          // Hook file doesn't exist, which is fine
+        }
+      }
+    } catch {
+      // Hooks directory doesn't exist, which is fine
+    }
+
+    return hooks;
+  }
+
+  async generateProject(
+    templateName: string, 
+    options: GenerationOptions
+  ): Promise<GenerationResult> {
+    const startTime = Date.now();
+    const result: GenerationResult = {
+      success: false,
+      filesCreated: [],
+      filesSkipped: [],
+      errors: [],
+      warnings: [],
+      duration: 0,
+      template: {} as TemplateMetadata,
+    };
+
+    try {
+      // Load template
+      const template = await this.loadTemplate(templateName);
+      result.template = template.metadata;
+
+      this.emit('generationStarted', templateName, options);
+
+      // Validate variables
+      const validationErrors = this.validateVariables(template.metadata.variables, options.variables);
+      if (validationErrors.length > 0) {
+        result.errors.push(...validationErrors);
+        return result;
+      }
+
+      // Create generation context
+      const context: GenerationContext = {
+        variables: { ...this.getDefaultVariables(template.metadata.variables), ...options.variables },
+        projectName: options.variables.projectName || basename(options.outputPath),
+        projectPath: options.outputPath,
+        templatePath: join(this.templatesPath, templateName),
+        helpers: this.helpers,
+      };
+
+      // Run pre-generate hook
+      if (!options.skipHooks && template.hooks?.preGenerate) {
+        await this.runHook(template.hooks.preGenerate, context);
+      }
+
+      // Create output directory
+      if (!options.dryRun) {
+        await fs.mkdir(options.outputPath, { recursive: true });
+      }
+
+      // Generate files
+      for (const file of template.files) {
+        try {
+          const outputPath = this.resolveOutputPath(file.path, context);
+          const fullOutputPath = join(options.outputPath, outputPath);
+
+          // Check if file already exists
+          if (!options.overwrite) {
+            try {
+              await fs.access(fullOutputPath);
+              result.filesSkipped.push(outputPath);
+              result.warnings.push(`File already exists: ${outputPath}`);
+              continue;
+            } catch {
+              // File doesn't exist, which is good
+            }
+          }
+
+          // Process file content
+          let content = file.content;
+          if (file.template) {
+            content = this.processTemplate(content, context);
+          }
+
+          // Create directory if needed
+          const fileDir = dirname(fullOutputPath);
+          if (!options.dryRun) {
+            await fs.mkdir(fileDir, { recursive: true });
+          }
+
+          // Write file
+          if (!options.dryRun) {
+            await fs.writeFile(fullOutputPath, content, file.encoding || 'utf8');
+            
+            // Set executable permission if needed
+            if (file.executable) {
+              await fs.chmod(fullOutputPath, 0o755);
+            }
+          }
+
+          result.filesCreated.push(outputPath);
+          this.emit('fileGenerated', outputPath, content.length);
+
+        } catch (error) {
+          const errorMsg = `Failed to generate file ${file.path}: ${error}`;
+          result.errors.push(errorMsg);
+          this.emit('fileError', file.path, error);
+        }
+      }
+
+      // Run post-generate hook
+      if (!options.skipHooks && template.hooks?.postGenerate) {
+        await this.runHook(template.hooks.postGenerate, context);
+      }
+
+      // Install dependencies
+      if (!options.skipInstall && template.metadata.dependencies.length > 0) {
+        await this.installDependencies(template, options.outputPath);
+      }
+
+      result.success = result.errors.length === 0;
+
+    } catch (error) {
+      result.errors.push(`Generation failed: ${error}`);
+      this.emit('generationError', templateName, error);
+    }
+
+    result.duration = Date.now() - startTime;
+    this.emit('generationCompleted', result);
+
+    return result;
+  }
+
+  private validateVariables(templateVars: TemplateVariable[], providedVars: Record<string, any>): string[] {
     const errors: string[] = [];
-    
-    // Validate required fields
-    if (!template.name) errors.push('Template name is required');
-    if (!template.description) errors.push('Template description is required');
-    if (!template.category) errors.push('Template category is required');
-    if (!template.files || Object.keys(template.files).length === 0) {
-      errors.push('Template must define at least one file');
-    }
-    
-    // Validate file templates exist
-    const templateDir = path.join(this.templatesPath, templateKey);
-    for (const [filePath, fileConfig] of Object.entries(template.files)) {
-      const templateFile = path.join(templateDir, fileConfig.template);
-      try {
-        await fs.access(templateFile);
-      } catch {
-        errors.push(`Template file not found: ${fileConfig.template}`);
+
+    for (const templateVar of templateVars) {
+      const value = providedVars[templateVar.name];
+
+      // Check required variables
+      if (templateVar.required && (value === undefined || value === null || value === '')) {
+        errors.push(`Required variable '${templateVar.name}' is missing`);
+        continue;
+      }
+
+      // Skip validation if value is not provided and not required
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      // Type validation
+      if (!this.validateVariableType(value, templateVar.type)) {
+        errors.push(`Variable '${templateVar.name}' must be of type ${templateVar.type}`);
+        continue;
+      }
+
+      // Custom validation
+      if (templateVar.validation) {
+        const validationResult = templateVar.validation(value);
+        if (validationResult !== true) {
+          const message = typeof validationResult === 'string' 
+            ? validationResult 
+            : `Variable '${templateVar.name}' failed validation`;
+          errors.push(message);
+        }
       }
     }
+
+    return errors;
+  }
+
+  private validateVariableType(value: any, type: string): boolean {
+    switch (type) {
+      case 'string':
+        return typeof value === 'string';
+      case 'number':
+        return typeof value === 'number' && !isNaN(value);
+      case 'boolean':
+        return typeof value === 'boolean';
+      case 'array':
+        return Array.isArray(value);
+      case 'object':
+        return typeof value === 'object' && value !== null && !Array.isArray(value);
+      default:
+        return true;
+    }
+  }
+
+  private getDefaultVariables(templateVars: TemplateVariable[]): Record<string, any> {
+    const defaults: Record<string, any> = {};
     
-    return { valid: errors.length === 0, errors };
+    for (const templateVar of templateVars) {
+      if (templateVar.default !== undefined) {
+        defaults[templateVar.name] = templateVar.default;
+      }
+    }
+
+    return defaults;
+  }
+
+  private resolveOutputPath(filePath: string, context: GenerationContext): string {
+    // Remove .template extension if present
+    let outputPath = filePath.endsWith('.template') 
+      ? filePath.slice(0, -9) 
+      : filePath;
+
+    // Process template variables in path
+    outputPath = this.processTemplate(outputPath, context);
+
+    return outputPath;
+  }
+
+  private processTemplate(content: string, context: GenerationContext): string {
+    // Simple template processing using string replacement
+    // In a production system, you might want to use a more robust template engine like Handlebars or Mustache
+    
+    let processed = content;
+
+    // Replace {{variable}} syntax
+    processed = processed.replace(/\\{\\{\\s*([^}]+)\\s*\\}\\}/g, (match, expression) => {
+      try {
+        return this.evaluateExpression(expression.trim(), context);
+      } catch (error) {
+        console.warn(`Template expression error: ${expression} - ${error}`);
+        return match; // Return original if evaluation fails
+      }
+    });
+
+    // Replace <%= expression %> syntax
+    processed = processed.replace(/<%=\\s*([^%]+)\\s*%>/g, (match, expression) => {
+      try {
+        return this.evaluateExpression(expression.trim(), context);
+      } catch (error) {
+        console.warn(`Template expression error: ${expression} - ${error}`);
+        return match; // Return original if evaluation fails
+      }
+    });
+
+    return processed;
+  }
+
+  private evaluateExpression(expression: string, context: GenerationContext): string {
+    // Create a safe evaluation context
+    const safeContext = {
+      ...context.variables,
+      ...context.helpers,
+      projectName: context.projectName,
+      projectPath: context.projectPath,
+    };
+
+    // Simple expression evaluation (be careful with eval in production!)
+    try {
+      const func = new Function(...Object.keys(safeContext), `return ${expression}`);
+      const result = func(...Object.values(safeContext));
+      return String(result);
+    } catch (error) {
+      // Fallback to simple variable replacement
+      if (safeContext.hasOwnProperty(expression)) {
+        return String(safeContext[expression]);
+      }
+      throw error;
+    }
+  }
+
+  private async runHook(hookPath: string, context: GenerationContext): Promise<void> {
+    try {
+      // In a production environment, you might want to use a more secure way to run hooks
+      const hookModule = require(hookPath);
+      if (typeof hookModule === 'function') {
+        await hookModule(context);
+      } else if (hookModule.default && typeof hookModule.default === 'function') {
+        await hookModule.default(context);
+      }
+    } catch (error) {
+      console.error(`Hook execution failed: ${hookPath} - ${error}`);
+      throw error;
+    }
+  }
+
+  private async installDependencies(template: Template, projectPath: string): Promise<void> {
+    // This would integrate with npm, yarn, or other package managers
+    // For now, just emit an event
+    this.emit('dependenciesInstallStarted', template.metadata.dependencies);
+    
+    // Simulate installation
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    this.emit('dependenciesInstallCompleted', template.metadata.dependencies);
+  }
+
+  async listTemplates(): Promise<TemplateMetadata[]> {
+    try {
+      const entries = await fs.readdir(this.templatesPath, { withFileTypes: true });
+      const templates: TemplateMetadata[] = [];
+
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          try {
+            const template = await this.loadTemplate(entry.name);
+            templates.push(template.metadata);
+          } catch (error) {
+            console.warn(`Failed to load template ${entry.name}: ${error}`);
+          }
+        }
+      }
+
+      return templates;
+    } catch (error) {
+      throw new Error(`Failed to list templates: ${error}`);
+    }
+  }
+
+  addHelper(name: string, helper: Function): void {
+    this.helpers[name] = helper;
+  }
+
+  removeHelper(name: string): void {
+    delete this.helpers[name];
+  }
+
+  getHelpers(): Record<string, Function> {
+    return { ...this.helpers };
   }
 }
+
+export default TemplateEngine;
