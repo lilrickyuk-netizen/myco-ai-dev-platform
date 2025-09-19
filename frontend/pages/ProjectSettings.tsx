@@ -91,7 +91,7 @@ const ProjectSettings: React.FC = () => {
       setFormData({
         name: projectData.name,
         description: projectData.description || '',
-        gitUrl: projectData.gitUrl || '',
+        gitUrl: projectData.repositoryUrl || '',
         deployUrl: projectData.deployUrl || '',
       });
     } catch (error) {
@@ -116,7 +116,7 @@ const ProjectSettings: React.FC = () => {
         id: project.id,
         name: formData.name,
         description: formData.description,
-        gitUrl: formData.gitUrl,
+        repositoryUrl: formData.gitUrl,
         deployUrl: formData.deployUrl,
       });
       

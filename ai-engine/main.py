@@ -2,10 +2,12 @@
 AI Engine - FastAPI-based service for LLM orchestration and AI capabilities
 """
 
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import StreamingResponse, Response
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from contextlib import asynccontextmanager
 import uvicorn
 import logging
@@ -13,6 +15,9 @@ import asyncio
 from typing import Dict, List, Any, Optional
 import json
 import time
+from pydantic import BaseModel, Field, validator
+import re
+import sys
 
 import os
 from dotenv import load_dotenv
@@ -35,9 +40,11 @@ except ImportError:
 
 try:
     from .services.llm_manager import llm_manager
+    from .services.provider_selector import provider_selector
 except ImportError:
     # Create basic llm_manager if module doesn't exist
     from services.llm_manager import llm_manager
+    from services.provider_selector import provider_selector
 
 # Setup logging
 def setup_logging():
@@ -90,6 +97,33 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# Include health check routes
+try:
+    from .api.routes.health import router as health_router
+    app.include_router(health_router, tags=["health"])
+except ImportError:
+    try:
+        from api.routes.health import router as health_router
+        app.include_router(health_router, tags=["health"])
+    except ImportError:
+        logger.warning("Health routes not available - using built-in endpoints")
+
+# Add request ID middleware for tracking
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    import uuid
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Process-Time"] = str(process_time)
+    
+    return response
+
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
@@ -105,16 +139,33 @@ async def root():
         ]
     }
 
+@app.get("/healthz")
+async def healthz():
+    """Kubernetes health check endpoint"""
+    try:
+        # Basic health checks
+        health_status = {
+            "status": "healthy",
+            "service": "ai-engine",
+            "version": "1.0.0",
+            "timestamp": time.time()
+        }
+        
+        # Check LLM manager
+        if hasattr(llm_manager, 'health_check'):
+            health_status["llm_manager"] = await llm_manager.health_check()
+        else:
+            health_status["llm_manager"] = "available"
+        
+        return health_status
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail="Service unhealthy")
+
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": "ai-engine",
-        "version": "1.0.0",
-        "uptime": time.time(),
-        "timestamp": time.time()
-    }
+    """Legacy health check endpoint"""
+    return await healthz()
 
 @app.get("/ready")
 async def ready():
@@ -132,6 +183,15 @@ async def ready():
         if not (has_openai or has_anthropic or has_google):
             status = "degraded"  # Running with stub provider only
         
+        # Test a simple generation to ensure providers are working
+        try:
+            test_response = await llm_manager.generate("test", max_tokens=1)
+            if not test_response or not test_response.content:
+                status = "degraded"
+        except Exception as test_error:
+            logger.warning(f"Provider test failed: {test_error}")
+            status = "degraded"
+        
         return {
             "status": status,
             "providers_available": providers,
@@ -142,10 +202,8 @@ async def ready():
             }
         }
     except Exception as e:
-        return {
-            "status": "degraded",
-            "error": str(e)
-        }
+        logger.error(f"Readiness check failed: {e}")
+        raise HTTPException(status_code=503, detail="Service not ready")
 
 @app.get("/models")
 async def get_models():
@@ -167,38 +225,189 @@ async def get_models():
     except Exception as e:
         return {"error": str(e), "models": {}}
 
+# Pydantic models for request validation
+class GenerationRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=32000, description="The text prompt")
+    model: Optional[str] = Field("gpt-3.5-turbo", description="Model to use")
+    messages: Optional[List[Dict[str, str]]] = Field(None, description="Chat messages")
+    max_tokens: Optional[int] = Field(1000, ge=1, le=4000, description="Maximum tokens")
+    temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="Sampling temperature")
+    timeout: Optional[int] = Field(30, ge=1, le=120, description="Request timeout in seconds")
+    
+    @validator('prompt')
+    def validate_prompt(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Prompt cannot be empty')
+        # Basic content filtering
+        if len(v) > 32000:
+            raise ValueError('Prompt too long')
+        return v.strip()
+    
+    @validator('model')
+    def validate_model(cls, v):
+        allowed_models = [
+            'gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo',
+            'claude-3-sonnet', 'claude-3-opus', 'claude-3-haiku',
+            'gemini-pro', 'gemini-1.5-pro'
+        ]
+        if v and v not in allowed_models:
+            logger.warning(f"Unknown model requested: {v}")
+        return v
+
+class ChatRequest(BaseModel):
+    messages: List[Dict[str, str]] = Field(..., min_items=1, description="Chat messages")
+    model: Optional[str] = Field("gpt-3.5-turbo", description="Model to use")
+    temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="Sampling temperature")
+    max_tokens: Optional[int] = Field(1000, ge=1, le=4000, description="Maximum tokens")
+    
+    @validator('messages')
+    def validate_messages(cls, v):
+        if not v:
+            raise ValueError('Messages cannot be empty')
+        for msg in v:
+            if 'role' not in msg or 'content' not in msg:
+                raise ValueError('Each message must have role and content')
+            if msg['role'] not in ['user', 'assistant', 'system']:
+                raise ValueError('Invalid message role')
+        return v
+
 @app.post("/generation")
-async def generate_text(request: dict):
-    """Generate text using LLM"""
+async def generate_text(request: GenerationRequest):
+    """Generate text using LLM with full validation and error handling"""
+    start_time = time.time()
+    
     try:
-        prompt = request.get("messages", [{}])[-1].get("content", "") or request.get("prompt", "")
-        model = request.get("model", "gpt-3.5-turbo")
+        # Extract prompt from messages or direct prompt
+        if request.messages:
+            prompt = request.messages[-1].get("content", "")
+            if not prompt:
+                raise HTTPException(status_code=400, detail="Last message must have content")
+        else:
+            prompt = request.prompt
         
-        if not prompt:
-            return {"error": "No prompt provided"}
+        # Use provider selector to choose best provider
+        model = request.model or "gpt-3.5-turbo"
         
-        # Use the appropriate provider based on model
+        # Get best provider for this model
+        provider_name = await provider_selector.get_best_provider(model=model)
+        if not provider_name:
+            raise HTTPException(status_code=503, detail="No available AI providers")
+        
+        # Convert to enum
         provider = None
-        if "gpt" in model:
+        if provider_name == "openai":
             from services.llm_manager import LLMProvider
             provider = LLMProvider.OPENAI
-        elif "claude" in model:
+        elif provider_name == "anthropic":
             from services.llm_manager import LLMProvider
             provider = LLMProvider.ANTHROPIC
-        elif "gemini" in model:
+        elif provider_name == "google":
             from services.llm_manager import LLMProvider
             provider = LLMProvider.GOOGLE
         
-        response = await llm_manager.generate(
-            prompt=prompt,
-            provider=provider,
-            model=model
+        # Set timeout
+        timeout = request.timeout or 30
+        
+        # Generate response with timeout
+        response = await asyncio.wait_for(
+            llm_manager.generate(
+                prompt=prompt,
+                provider=provider,
+                model=model,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature
+            ),
+            timeout=timeout
         )
         
-        return llm_manager.format_openai_response(response)
+        # Format OpenAI-compatible response
+        formatted_response = llm_manager.format_openai_response(response)
+        
+        # Add timing information
+        formatted_response["processing_time"] = time.time() - start_time
+        
+        return formatted_response
+        
+    except asyncio.TimeoutError:
+        logger.error(f"Generation timeout after {request.timeout}s")
+        raise HTTPException(status_code=408, detail="Request timeout")
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Generation error: {e}")
-        return {"error": str(e)}
+        # Record error for provider health tracking
+        if 'provider_name' in locals():
+            await provider_selector.record_provider_error(provider_name, e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/chat")
+async def chat_completion(request: ChatRequest):
+    """Chat completion endpoint with validation"""
+    start_time = time.time()
+    
+    try:
+        # Get the last user message
+        last_message = request.messages[-1]
+        if last_message.get('role') != 'user':
+            raise HTTPException(status_code=400, detail="Last message must be from user")
+        
+        prompt = last_message.get('content', '')
+        if not prompt.strip():
+            raise HTTPException(status_code=400, detail="Message content cannot be empty")
+        
+        # Use provider selector for chat as well
+        model = request.model or "gpt-3.5-turbo"
+        
+        provider_name = await provider_selector.get_best_provider(model=model)
+        if not provider_name:
+            raise HTTPException(status_code=503, detail="No available AI providers")
+        
+        provider = None
+        if provider_name == "openai":
+            from services.llm_manager import LLMProvider
+            provider = LLMProvider.OPENAI
+        elif provider_name == "anthropic":
+            from services.llm_manager import LLMProvider
+            provider = LLMProvider.ANTHROPIC
+        elif provider_name == "google":
+            from services.llm_manager import LLMProvider
+            provider = LLMProvider.GOOGLE
+        
+        # Generate response
+        response = await asyncio.wait_for(
+            llm_manager.generate(
+                prompt=prompt,
+                provider=provider,
+                model=model,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature
+            ),
+            timeout=30.0
+        )
+        
+        return {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": response.content
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": response.usage if hasattr(response, 'usage') else {},
+            "model": model,
+            "processing_time": time.time() - start_time
+        }
+        
+    except asyncio.TimeoutError:
+        logger.error("Chat completion timeout")
+        raise HTTPException(status_code=408, detail="Request timeout")
+    except Exception as e:
+        logger.error(f"Chat completion error: {e}")
+        # Record error for provider health tracking
+        if 'provider_name' in locals():
+            await provider_selector.record_provider_error(provider_name, e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/agents/plan")
 async def plan_agent_task(request: dict):
@@ -268,9 +477,20 @@ async def _handle_streaming_generation(payload: Dict[str, Any]):
     except Exception as e:
         yield {"error": str(e), "timestamp": time.time()}
 
-# Error handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
+# Enhanced error handlers
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning(f"Validation error on {request.url}: {exc}")
+    return {
+        "error": "Validation failed",
+        "details": exc.errors(),
+        "status_code": 422,
+        "timestamp": time.time()
+    }
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    logger.warning(f"HTTP exception on {request.url}: {exc.detail}")
     return {
         "error": exc.detail,
         "status_code": exc.status_code,
@@ -278,12 +498,13 @@ async def http_exception_handler(request, exc):
     }
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    logger.error(f"Unhandled exception: {exc}")
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
     return {
         "error": "Internal server error",
         "status_code": 500,
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "request_id": getattr(request.state, 'request_id', 'unknown')
     }
 
 # Health check endpoints
@@ -295,8 +516,15 @@ async def ping():
 @app.get("/metrics")
 async def metrics():
     """Prometheus metrics endpoint"""
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    try:
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    except ImportError:
+        # Fallback if prometheus_client is not installed
+        return {
+            "error": "Metrics not available - prometheus_client not installed",
+            "timestamp": time.time()
+        }
 
 if __name__ == "__main__":
     uvicorn.run(

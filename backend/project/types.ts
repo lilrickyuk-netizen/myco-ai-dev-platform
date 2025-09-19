@@ -5,23 +5,27 @@ export interface Project {
   template?: string;
   templateType: string;
   templateName: string;
-  status: string;
-  gitUrl?: string;
+  status: "active" | "archived" | "deleted";
+  visibility: "private" | "public";
+  repositoryUrl?: string;
   deployUrl?: string;
   createdAt: string;
   updatedAt: string;
+  isOwner: boolean;
 }
 
 export interface CreateProjectRequest {
   name: string;
   description?: string;
   template?: string;
+  visibility?: "private" | "public";
 }
 
 export interface UpdateProjectRequest {
   name?: string;
   description?: string;
-  gitUrl?: string;
+  repositoryUrl?: string;
   deployUrl?: string;
-  status?: string;
+  status?: "active" | "archived" | "deleted";
+  visibility?: "private" | "public";
 }

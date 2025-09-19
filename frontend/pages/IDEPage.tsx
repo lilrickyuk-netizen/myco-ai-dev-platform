@@ -45,6 +45,8 @@ export default function IDEPage() {
           templateType: 'web',
           templateName: 'React TypeScript',
           status: 'active',
+          visibility: 'private',
+          isOwner: true,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });

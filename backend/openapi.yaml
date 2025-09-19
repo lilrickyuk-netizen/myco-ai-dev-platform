@@ -1,0 +1,823 @@
+openapi: 3.1.0
+info:
+  title: MYCO AI Dev Platform API
+  description: Comprehensive API for the AI-powered development platform
+  version: 1.0.0
+  contact:
+    name: MYCO AI Platform Team
+    email: support@myco.ai
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://myco-ai-dev-platform-d32ldfc82vjkjrpel8hg.lp.dev
+    description: Production server
+  - url: http://localhost:4000
+    description: Development server
+
+security:
+  - BearerAuth: []
+  - SessionCookie: []
+
+paths:
+  # Health and System Endpoints
+  /health:
+    get:
+      tags: [Health]
+      summary: Global health check
+      description: Returns the overall health status of the platform
+      security: []
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalHealthResponse'
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      description: Returns readiness status for load balancer
+      security: []
+      responses:
+        '200':
+          description: Readiness status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+
+  # Authentication Endpoints
+  /user/me:
+    get:
+      tags: [Authentication]
+      summary: Get current user information
+      description: Returns the authenticated user's profile information
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfo'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # Project Management Endpoints
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List user projects
+      description: Returns all projects accessible to the authenticated user
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      tags: [Projects]
+      summary: Create new project
+      description: Creates a new project for the authenticated user
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /projects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Project ID
+
+    get:
+      tags: [Projects]
+      summary: Get project by ID
+      description: Returns detailed information about a specific project
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags: [Projects]
+      summary: Update project
+      description: Updates an existing project
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      description: Deletes a project (only accessible to project owner)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Project deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # File System Endpoints
+  /filesystem/{projectId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Project ID
+
+    get:
+      tags: [FileSystem]
+      summary: List project files
+      description: Returns the hierarchical file structure for a project
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: File list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /filesystem/file:
+    post:
+      tags: [FileSystem]
+      summary: Create file or directory
+      description: Creates a new file or directory in a project
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFileRequest'
+      responses:
+        '201':
+          description: File created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileNode'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /filesystem/file/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: File ID
+
+    get:
+      tags: [FileSystem]
+      summary: Get file by ID
+      description: Returns file content and metadata
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: File details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileNode'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags: [FileSystem]
+      summary: Update file content
+      description: Updates the content of an existing file
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFileRequest'
+      responses:
+        '200':
+          description: File updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileNode'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags: [FileSystem]
+      summary: Delete file or directory
+      description: Deletes a file or directory and all its children
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: File deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # AI Generation Endpoints
+  /ai/generate:
+    post:
+      tags: [AI]
+      summary: Generate AI content
+      description: Generates text content using AI models
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+      responses:
+        '200':
+          description: Generated content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '408':
+          $ref: '#/components/responses/TimeoutError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
+
+  /ai/chat:
+    post:
+      tags: [AI]
+      summary: Chat with AI
+      description: Multi-turn chat conversation with AI
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '408':
+          $ref: '#/components/responses/TimeoutError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+
+  schemas:
+    # Health Schemas
+    GlobalHealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy, degraded]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        services:
+          type: array
+          items:
+            type: string
+        environment:
+          type: object
+          properties:
+            valid:
+              type: boolean
+            errors:
+              type: array
+              items:
+                type: string
+            warnings:
+              type: array
+              items:
+                type: string
+            missingOptional:
+              type: array
+              items:
+                type: string
+            database:
+              type: string
+        nodeEnv:
+          type: string
+
+    ReadinessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded]
+        services:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [available, unavailable]
+            ai_engine:
+              type: string
+              enum: [available, unavailable]
+        timestamp:
+          type: string
+          format: date-time
+
+    # User Schemas
+    UserInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        imageUrl:
+          type: string
+          format: uri
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+
+    # Project Schemas
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        template:
+          type: string
+          nullable: true
+        templateType:
+          type: string
+        templateName:
+          type: string
+        status:
+          type: string
+          enum: [active, archived, deleted]
+        visibility:
+          type: string
+          enum: [private, public]
+        repositoryUrl:
+          type: string
+          format: uri
+          nullable: true
+        deployUrl:
+          type: string
+          format: uri
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        isOwner:
+          type: boolean
+
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+          nullable: true
+        template:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [private, public]
+          default: private
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+          nullable: true
+        repositoryUrl:
+          type: string
+          format: uri
+          nullable: true
+        deployUrl:
+          type: string
+          format: uri
+          nullable: true
+        status:
+          type: string
+          enum: [active, archived, deleted]
+        visibility:
+          type: string
+          enum: [private, public]
+
+    # File System Schemas
+    FileNode:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+          enum: [file, directory]
+        content:
+          type: string
+          nullable: true
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileNode'
+          nullable: true
+        size:
+          type: integer
+          minimum: 0
+        lastModified:
+          type: string
+          format: date-time
+        isReadonly:
+          type: boolean
+
+    FileListResponse:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileNode'
+
+    CreateFileRequest:
+      type: object
+      required: [projectId, path, type]
+      properties:
+        projectId:
+          type: string
+        path:
+          type: string
+        content:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [file, directory]
+
+    UpdateFileRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+
+    # AI Schemas
+    GenerateRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 32000
+        model:
+          type: string
+          nullable: true
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+          nullable: true
+        maxTokens:
+          type: integer
+          minimum: 1
+          maximum: 4000
+          nullable: true
+        projectId:
+          type: string
+          nullable: true
+        context:
+          type: string
+          nullable: true
+
+    GenerateResponse:
+      type: object
+      properties:
+        content:
+          type: string
+        usage:
+          type: object
+          properties:
+            promptTokens:
+              type: integer
+            completionTokens:
+              type: integer
+            totalTokens:
+              type: integer
+
+    ChatMessage:
+      type: object
+      required: [id, role, content, timestamp]
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ChatRequest:
+      type: object
+      required: [messages]
+      properties:
+        sessionId:
+          type: string
+          nullable: true
+        messages:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        projectId:
+          type: string
+          nullable: true
+
+    ChatResponse:
+      type: object
+      properties:
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+        sessionId:
+          type: string
+
+    # Error Schemas
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          nullable: true
+
+  responses:
+    BadRequestError:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: invalid_argument
+            message: The request parameters are invalid
+
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: unauthenticated
+            message: Authentication required
+
+    ForbiddenError:
+      description: Access denied
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: permission_denied
+            message: Access denied to this resource
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: not_found
+            message: The requested resource was not found
+
+    ConflictError:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: already_exists
+            message: Resource already exists
+
+    TimeoutError:
+      description: Request timeout
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: deadline_exceeded
+            message: Request timeout
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: resource_exhausted
+            message: Rate limit exceeded
+
+    ServiceUnavailableError:
+      description: Service temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: unavailable
+            message: Service temporarily unavailable
+
+tags:
+  - name: Health
+    description: Health and monitoring endpoints
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Projects
+    description: Project management operations
+  - name: FileSystem
+    description: File and directory operations
+  - name: AI
+    description: AI generation and chat functionality

@@ -1,19 +1,200 @@
-import { api } from "encore.dev/api";
+import { api, APIError } from "encore.dev/api";
 import type { ChatMessage, GenerateRequest, GenerateResponse } from "./types";
+import { getAuthData } from "~encore/auth";
+import db from "../db";
 
+// Generates AI responses using the AI engine service.
 export const generate = api(
-  { expose: true, method: "POST", path: "/ai/generate" },
+  { expose: true, method: "POST", path: "/ai/generate", auth: true },
   async (req: GenerateRequest): Promise<GenerateResponse> => {
+    if (!req.prompt || typeof req.prompt !== 'string' || req.prompt.trim().length === 0) {
+      throw APIError.invalidArgument("Valid prompt is required");
+    }
+
+    if (req.prompt.length > 32000) {
+      throw APIError.invalidArgument("Prompt too long (max 32000 characters)");
+    }
+
+    const auth = getAuthData();
+    if (!auth) {
+      throw APIError.unauthenticated("Authentication required");
+    }
+
+    // Validate project access if provided
+    if (req.projectId) {
+      const projectAccess = await db.queryRow`
+        SELECT p.id FROM projects p
+        LEFT JOIN project_collaborators pc ON p.id = pc.project_id
+        WHERE p.id = ${req.projectId} 
+        AND (p.owner_id = ${auth.userID} OR pc.user_id = ${auth.userID})
+      `;
+
+      if (!projectAccess) {
+        throw APIError.permissionDenied("Access denied to this project");
+      }
+    }
+
+    try {
+      const aiEngineUrl = process.env.AI_ENGINE_URL || "http://ai-engine:8001";
+      const timeoutMs = 30000; // 30 second timeout
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetch(`${aiEngineUrl}/generation`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            prompt: req.prompt,
+            model: req.model || "gpt-3.5-turbo",
+            messages: [{ role: "user", content: req.prompt }],
+            max_tokens: req.maxTokens || 1000,
+            temperature: req.temperature || 0.7
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          if (response.status === 429) {
+            throw APIError.resourceExhausted("Rate limit exceeded");
+          }
+          if (response.status >= 500) {
+            throw APIError.unavailable("AI service temporarily unavailable");
+          }
+          throw APIError.internal(`AI Engine error: ${response.status}`);
+        }
+
+        const data = await response.json() as any;
+        
+        if (data.error) {
+          throw APIError.internal(data.error);
+        }
+
+        const content = data.choices?.[0]?.message?.content || data.response || "No response from AI";
+        const usage = {
+          promptTokens: data.usage?.prompt_tokens || Math.ceil(req.prompt.length / 4),
+          completionTokens: data.usage?.completion_tokens || Math.ceil(content.length / 4),
+          totalTokens: data.usage?.total_tokens || Math.ceil((req.prompt.length + content.length) / 4),
+        };
+
+        // Log the generation for analytics
+        await db.exec`
+          INSERT INTO ai_generations (user_id, project_id, prompt, response, model, prompt_tokens, completion_tokens, total_tokens)
+          VALUES (${auth.userID}, ${req.projectId || null}, ${req.prompt}, ${content}, ${req.model || "gpt-3.5-turbo"}, ${usage.promptTokens}, ${usage.completionTokens}, ${usage.totalTokens})
+        `;
+
+        return {
+          content,
+          usage
+        };
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          throw APIError.deadlineExceeded("Request timeout");
+        }
+        throw fetchError;
+      }
+    } catch (error) {
+      console.error("AI generation error:", error);
+      
+      // Re-throw APIErrors as-is
+      if (error instanceof APIError) {
+        throw error;
+      }
+      
+      throw APIError.unavailable("AI service temporarily unavailable");
+    }
+  }
+);
+
+interface ChatRequest {
+  sessionId?: string;
+  messages: ChatMessage[];
+  projectId?: string;
+}
+
+interface ChatResponse {
+  message: ChatMessage;
+  sessionId: string;
+}
+
+// Handles multi-turn chat conversations with context.
+export const chat = api(
+  { expose: true, method: "POST", path: "/ai/chat", auth: true },
+  async (req: ChatRequest): Promise<ChatResponse> => {
+    if (!req.messages || !Array.isArray(req.messages) || req.messages.length === 0) {
+      throw APIError.invalidArgument("Messages array is required");
+    }
+
+    const lastMessage = req.messages[req.messages.length - 1];
+    if (!lastMessage || lastMessage.role !== 'user') {
+      throw APIError.invalidArgument("Last message must be from user");
+    }
+
+    const auth = getAuthData();
+    if (!auth) {
+      throw APIError.unauthenticated("Authentication required");
+    }
+
+    // Validate project access if provided
+    if (req.projectId) {
+      const projectAccess = await db.queryRow`
+        SELECT p.id FROM projects p
+        LEFT JOIN project_collaborators pc ON p.id = pc.project_id
+        WHERE p.id = ${req.projectId} 
+        AND (p.owner_id = ${auth.userID} OR pc.user_id = ${auth.userID})
+      `;
+
+      if (!projectAccess) {
+        throw APIError.permissionDenied("Access denied to this project");
+      }
+    }
+
+    let sessionId = req.sessionId;
+
+    // Create or validate session
+    if (!sessionId) {
+      const session = await db.queryRow<{ id: string }>`
+        INSERT INTO chat_sessions (user_id, project_id, title)
+        VALUES (${auth.userID}, ${req.projectId || null}, ${lastMessage.content.slice(0, 50)})
+        RETURNING id::text
+      `;
+      sessionId = session!.id;
+    } else {
+      const session = await db.queryRow`
+        SELECT id FROM chat_sessions 
+        WHERE id = ${sessionId} AND user_id = ${auth.userID}
+      `;
+      if (!session) {
+        throw APIError.notFound("Chat session not found");
+      }
+    }
+
+    // Store user message
+    await db.exec`
+      INSERT INTO chat_messages (session_id, role, content)
+      VALUES (${sessionId}, ${lastMessage.role}, ${lastMessage.content})
+    `;
+
     try {
       const aiEngineUrl = process.env.AI_ENGINE_URL || "http://ai-engine:8001";
       
-      const response = await fetch(`${aiEngineUrl}/generation`, {
+      const response = await fetch(`${aiEngineUrl}/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
-          prompt: req.prompt,
-          model: req.model || "gpt-3.5-turbo",
-          messages: [{ role: "user", content: req.prompt }]
+          messages: req.messages,
+          model: "gpt-3.5-turbo",
+          temperature: 0.7
         })
       });
 
@@ -21,45 +202,47 @@ export const generate = api(
         throw new Error(`AI Engine error: ${response.status}`);
       }
 
-      const data = await response.json();
-      
-      if (data.error) {
-        throw new Error(data.error);
-      }
+      const data = await response.json() as any;
+      const assistantContent = data.choices?.[0]?.message?.content || "I apologize, but I couldn't generate a response at this time.";
+
+      const assistantMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: assistantContent,
+        timestamp: new Date(),
+      };
+
+      // Store assistant message
+      await db.exec`
+        INSERT INTO chat_messages (session_id, role, content)
+        VALUES (${sessionId}, ${assistantMessage.role}, ${assistantMessage.content})
+      `;
 
       return {
-        content: data.choices?.[0]?.message?.content || "No response from AI",
-        usage: {
-          promptTokens: data.usage?.prompt_tokens || 0,
-          completionTokens: data.usage?.completion_tokens || 0,
-          totalTokens: data.usage?.total_tokens || 0,
-        }
+        message: assistantMessage,
+        sessionId
       };
     } catch (error) {
-      console.error("AI generation error:", error);
+      console.error("Chat error:", error);
       
-      // Return stub response if AI engine is unavailable
+      // Fallback response
+      const fallbackMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: "I'm experiencing technical difficulties right now. Please try again in a moment.",
+        timestamp: new Date(),
+      };
+
+      // Store fallback message
+      await db.exec`
+        INSERT INTO chat_messages (session_id, role, content)
+        VALUES (${sessionId}, ${fallbackMessage.role}, ${fallbackMessage.content})
+      `;
+
       return {
-        content: `AI service temporarily unavailable. Stub response for: "${req.prompt}"\n\nThis would normally be generated by an AI model. Configure AI_PROVIDER and API keys to enable full functionality.`,
-        usage: {
-          promptTokens: req.prompt.length / 4,
-          completionTokens: 50,
-          totalTokens: req.prompt.length / 4 + 50,
-        }
+        message: fallbackMessage,
+        sessionId
       };
     }
-  }
-);
-
-export const chat = api(
-  { expose: true, method: "POST", path: "/ai/chat" },
-  async ({ messages }: { messages: ChatMessage[] }): Promise<ChatMessage> => {
-    // Mock implementation
-    return {
-      id: Date.now().toString(),
-      role: "assistant",
-      content: `This is a mock response to: "${messages[messages.length - 1]?.content || 'your message'}"`,
-      timestamp: new Date(),
-    };
   }
 );
