@@ -1,0 +1,20 @@
+# Override to use regular docker instead of the Encore.ts build system
+version: '3.8'
+
+services:
+  backend:
+    command: ["sh", "-c", "npm install && npx encore run --port 3001"]
+    environment:
+      - ENCORE_DISABLE_BUILD_CACHE=true
+    
+  frontend:
+    command: ["sh", "-c", "npm install && npm run preview -- --port 3000 --host 0.0.0.0"]
+    
+  execution-engine:
+    command: ["sh", "-c", "npm install && npm run build && npm start"]
+    
+  template-engine:
+    command: ["sh", "-c", "npm install && npm run build && npm start"]
+    
+  validation-engine:
+    command: ["sh", "-c", "npm install && npm run build && npm start"]

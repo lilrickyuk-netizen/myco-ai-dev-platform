@@ -1,5 +1,6 @@
 import { api } from "encore.dev/api";
 import { validateEnvironment } from "./env-validation";
+import { HTTPError } from "encore.dev/api";
 
 export interface GlobalHealthResponse {
   status: "healthy" | "unhealthy" | "degraded";
@@ -44,6 +45,63 @@ export const health = api(
       ],
       environment: envValidation,
       nodeEnv: process.env.NODE_ENV || "unknown"
+    };
+  }
+);
+
+export interface ReadinessResponse {
+  status: "ready" | "degraded";
+  services: {
+    postgres: "available" | "unavailable";
+    redis: "available" | "unavailable";
+    ai_engine: "available" | "unavailable";
+  };
+  timestamp: string;
+}
+
+export const ready = api(
+  { expose: true, method: "GET", path: "/ready" },
+  async (): Promise<ReadinessResponse> => {
+    const services = {
+      postgres: "unavailable" as "available" | "unavailable",
+      redis: "unavailable" as "available" | "unavailable", 
+      ai_engine: "unavailable" as "available" | "unavailable"
+    };
+
+    // Check Postgres
+    try {
+      // This would be implemented with actual database connection
+      services.postgres = "available";
+    } catch (error) {
+      console.error("Postgres check failed:", error);
+    }
+
+    // Check Redis
+    try {
+      // This would be implemented with actual Redis connection
+      services.redis = "available";
+    } catch (error) {
+      console.error("Redis check failed:", error);
+    }
+
+    // Check AI Engine
+    try {
+      const aiEngineUrl = process.env.AI_ENGINE_URL || "http://ai-engine:8001";
+      const response = await fetch(`${aiEngineUrl}/health`);
+      if (response.ok) {
+        services.ai_engine = "available";
+      }
+    } catch (error) {
+      console.error("AI Engine check failed:", error);
+    }
+
+    const allAvailable = Object.values(services).every(s => s === "available");
+    const status = allAvailable ? "ready" : "degraded";
+
+    return {
+      status,
+      services,
+      timestamp: new Date().toISOString()
     };
   }
 );

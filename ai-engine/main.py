@@ -40,6 +40,12 @@ except ImportError:
     from services.llm_manager import llm_manager
 
 # Setup logging
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -189,18 +195,7 @@ async def generate_text(request: dict):
             model=model
         )
         
-        return {
-            "choices": [{
-                "message": {
-                    "content": response.content,
-                    "role": "assistant"
-                },
-                "finish_reason": response.finish_reason
-            }],
-            "usage": response.usage,
-            "model": response.model,
-            "object": "chat.completion"
-        }
+        return llm_manager.format_openai_response(response)
     except Exception as e:
         logger.error(f"Generation error: {e}")
         return {"error": str(e)}
@@ -239,11 +234,10 @@ async def websocket_generation(websocket: WebSocket):
                 })
                 
             elif request_type == "agent_status":
-                # Handle agent status request
-                status = await agent_manager.get_status()
+                # Handle agent status request - basic implementation
                 await websocket.send_json({
                     "type": "agent_status",
-                    "data": status
+                    "data": {"status": "ready", "agents": []}
                 })
                 
     except Exception as e:
@@ -262,11 +256,13 @@ async def _handle_streaming_generation(payload: Dict[str, Any]):
         messages = payload.get("messages", [])
         stream = payload.get("stream", True)
         
+        prompt = messages[-1].get("content", "") if messages else ""
+        
         if stream:
-            async for chunk in llm_manager.stream_completion(model_name, messages):
+            async for chunk in llm_manager.generate_stream(prompt):
                 yield {"content": chunk, "timestamp": time.time()}
         else:
-            response = await llm_manager.complete(model_name, messages)
+            response = await llm_manager.generate(prompt, model=model_name)
             yield {"content": response.content, "timestamp": time.time(), "complete": True}
             
     except Exception as e:

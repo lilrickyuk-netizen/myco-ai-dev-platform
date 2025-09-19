@@ -744,7 +744,7 @@ from app.core.config import settings
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="API for """ + requirements.get('name', 'Application') + '''"
+    description="API for " + requirements.get('name', 'Application')
 )
 
 app.add_middleware(

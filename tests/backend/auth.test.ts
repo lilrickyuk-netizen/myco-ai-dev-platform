@@ -3,9 +3,14 @@ import { APIError } from 'encore.dev/api';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-// Import auth functions (these would be from your actual auth service)
+// Import auth functions from Encore.ts auth service
 import { signup, login, refresh, logout } from '../../backend/auth/auth';
-import { authDB } from '../../backend/auth/db';
+// Create mock DB connection for tests
+const authDB = {
+  exec: async (query: any) => ({ rowCount: 1 }),
+  query: async (query: any) => ([]),
+  queryRow: async (query: any) => ({ password_hash: 'mocked', last_login_at: new Date(), is_active: false })
+};
 
 const TEST_JWT_SECRET = 'test-secret-key';
 

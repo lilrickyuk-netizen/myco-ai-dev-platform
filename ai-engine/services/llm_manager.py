@@ -247,7 +247,7 @@ Please provide a helpful response based on the context above."""
             },
             model=response.model,
             finish_reason=choice.finish_reason,
-            metadata={"provider": "openai"}
+            metadata={"provider": "openai", "id": response.id, "created": response.created}
         )
     
     async def _stream_openai(self, prompt: str, config: LLMConfig) -> AsyncGenerator[str, None]:
@@ -505,6 +505,27 @@ For now, this stub allows the service to run and be tested without API keys."""
             await asyncio.sleep(0.05)  # Simulate streaming delay
             yield word + " "
     
+    def format_openai_response(self, response: LLMResponse, request_id: str = None) -> Dict[str, Any]:
+        """Format response in OpenAI-compatible format"""
+        import uuid
+        import time
+        
+        return {
+            "id": request_id or response.metadata.get("id", f"chatcmpl-{uuid.uuid4().hex[:8]}"),
+            "object": "chat.completion",
+            "created": response.metadata.get("created", int(time.time())),
+            "model": response.model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": response.content
+                },
+                "finish_reason": response.finish_reason
+            }],
+            "usage": response.usage
+        }
+
     async def health_check(self) -> Dict[str, Any]:
         """Check health of all providers"""
         health = {}
