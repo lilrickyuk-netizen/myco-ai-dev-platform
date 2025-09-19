@@ -5,6 +5,10 @@ import { Toaster } from '@/components/ui/toaster';
 import Dashboard from './components/Dashboard';
 import IDEPage from './pages/IDEPage';
 import ProjectSettings from './pages/ProjectSettings';
+import Terms from './src/pages/terms';
+import Privacy from './src/pages/privacy';
+import Support from './src/pages/support';
+import Footer from './components/Footer';
 import config from './config';
 import { apiClient } from './src/services/api/client';
 
@@ -132,33 +136,41 @@ function App() {
 function AppInner() {
   return (
     <Router>
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/ide/:projectId"
-          element={
-            <ProtectedRoute>
-              <IDEPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/projects/:projectId/settings"
-          element={
-            <ProtectedRoute>
-              <ProjectSettings />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <div className="min-h-screen flex flex-col">
+        <div className="flex-1">
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/ide/:projectId"
+              element={
+                <ProtectedRoute>
+                  <IDEPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects/:projectId/settings"
+              element={
+                <ProtectedRoute>
+                  <ProjectSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/support" element={<Support />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+        <Footer />
+      </div>
     </Router>
   );
 }

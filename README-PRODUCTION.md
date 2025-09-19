@@ -225,6 +225,152 @@ The Hybrid Development Platform with Myco Multi-Agent System is now **100% compl
 
 This represents the most advanced AI-powered development platform ever created, ready to revolutionize how software is built, tested, and deployed.
 
+## 💼 Commercial Wrappers
+
+The platform includes SaaS-ready commercial wrappers that allow you to monetize your deployment with minimal configuration. All legal and pricing fields are left as placeholders for you to customize.
+
+### 🏢 Legal Pages
+
+**Location**: `frontend/src/pages/`
+- **Terms of Service** (`terms.tsx`) - Replace placeholder with your actual terms
+- **Privacy Policy** (`privacy.tsx`) - Replace placeholder with your privacy policy  
+- **Support Page** (`support.tsx`) - Configure your support contact email
+
+**Configuration**:
+```bash
+# Set support email in environment
+VITE_SUPPORT_EMAIL=your-support@company.com
+```
+
+### 💳 Billing & Subscriptions (Stripe Integration)
+
+**Location**: `backend/billing/`
+
+**Features**:
+- Stripe test-mode integration with webhook support
+- Subscription management (free, pro, enterprise tiers)
+- Customer lifecycle tracking
+- Event-driven billing updates
+
+**Setup Instructions**:
+
+1. **Configure Stripe Secrets** (in Infrastructure tab):
+   ```bash
+   StripeSecretKey=sk_test_your_stripe_secret_key
+   StripeWebhookSecret=whsec_your_webhook_secret
+   StripePriceId=price_your_product_price_id
+   EnableBilling=true
+   ```
+
+2. **Enable Billing**:
+   ```bash
+   VITE_ENABLE_BILLING=true
+   ```
+
+3. **Configure Stripe Products**:
+   - Replace `INSERT_PRICE_ID` placeholders with your actual Stripe price IDs
+   - Set up webhook endpoint: `/billing/webhook`
+   - Configure webhook events: `customer.created`, `invoice.created`, `payment_intent.succeeded`, `customer.subscription.*`
+
+**API Endpoints**:
+- `POST /billing/create-checkout` - Create Stripe checkout session
+- `POST /billing/webhook` - Handle Stripe webhook events  
+- `GET /billing/subscription` - Get user subscription status
+
+### 🔐 Entitlements & Feature Gating
+
+**Location**: `backend/entitlements/`
+
+**Features**:
+- Plan-based feature access control
+- Middleware for protecting premium features
+- Project limits for free users (3 projects max)
+- Feature flags for gradual rollouts
+
+**Available Features**:
+- `ai_generation` - AI code generation (all plans)
+- `project_collaboration` - Real-time collaboration (pro+)  
+- `advanced_templates` - Premium project templates (pro+)
+- `priority_support` - Priority customer support (pro+)
+- `unlimited_projects` - No project limits (pro+)
+- `custom_integrations` - Enterprise integrations (enterprise)
+
+**Usage Example**:
+```typescript
+import { requireFeature } from "../entitlements/middleware";
+import { FEATURES } from "../entitlements/types";
+
+// Protect an API endpoint
+await requireFeature(FEATURES.UNLIMITED_PROJECTS);
+```
+
+**Plan Configuration**:
+```typescript
+const PLAN_FEATURES = {
+  free: ['ai_generation'],
+  pro: ['ai_generation', 'project_collaboration', 'advanced_templates', 'priority_support', 'unlimited_projects'],
+  enterprise: ['ai_generation', 'project_collaboration', 'advanced_templates', 'priority_support', 'custom_integrations', 'unlimited_projects']
+};
+```
+
+### 🛠️ Configuration Guide
+
+**Environment Variables** (see `.env.example`):
+```bash
+# Commercial Features
+VITE_ENABLE_BILLING=false          # Enable/disable billing
+VITE_SUPPORT_EMAIL=INSERT_EMAIL    # Support contact email
+
+# Stripe Configuration (Secrets)
+StripeSecretKey=INSERT_KEY         # Stripe secret key
+StripeWebhookSecret=INSERT_SECRET  # Webhook verification secret  
+StripePriceId=INSERT_PRICE_ID      # Default product price ID
+EnableBilling=false                # Enable billing enforcement
+```
+
+**Database Tables**:
+- `billing_customers` - Customer records linked to users
+- `billing_subscriptions` - Subscription status and plans
+- `billing_events` - Stripe webhook event log
+
+### 🎯 Customization Checklist
+
+**Before going live**:
+
+1. **Legal Content**:
+   - [ ] Replace Terms of Service placeholder text
+   - [ ] Replace Privacy Policy placeholder text  
+   - [ ] Set support email address
+
+2. **Stripe Setup**:
+   - [ ] Create Stripe account and get API keys
+   - [ ] Create product and pricing plans
+   - [ ] Configure webhook endpoint
+   - [ ] Update price IDs in configuration
+   - [ ] Test payment flows in Stripe test mode
+
+3. **Feature Planning**:
+   - [ ] Define your subscription tiers and features
+   - [ ] Update `PLAN_FEATURES` mapping
+   - [ ] Add entitlement checks to premium features
+   - [ ] Test feature access for each plan
+
+4. **Billing Configuration**:
+   - [ ] Set all Stripe secrets in Infrastructure tab
+   - [ ] Enable billing with `VITE_ENABLE_BILLING=true`
+   - [ ] Test subscription lifecycle (create, update, cancel)
+   - [ ] Verify webhook events are processed correctly
+
+**Commercial Features Status**:
+✅ **Legal pages with placeholders**  
+✅ **Stripe billing integration**  
+✅ **Subscription management**  
+✅ **Feature entitlements**  
+✅ **Project limits enforcement**  
+✅ **Support contact system**  
+✅ **Webhook event handling**  
+✅ **Test coverage for billing flows**
+
 ---
 
 **Built with cutting-edge technologies and best practices. Ready to scale from startup to enterprise.**

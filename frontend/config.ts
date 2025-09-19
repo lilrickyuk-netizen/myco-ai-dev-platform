@@ -13,6 +13,13 @@ export const config = {
   // Fill in your Clerk publishable key from your Clerk dashboard
   clerkPublishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || '',
   
+  // Support configuration
+  // Fill in your support email address
+  supportEmail: process.env.VITE_SUPPORT_EMAIL || 'INSERT_SUPPORT_EMAIL',
+  
+  // Billing configuration
+  enableBilling: process.env.VITE_ENABLE_BILLING === 'true',
+  
   // Application metadata
   appName: 'MYCO AI Dev Platform',
   appVersion: '1.0.0',

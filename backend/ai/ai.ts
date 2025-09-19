@@ -1,12 +1,17 @@
 import { api, APIError } from "encore.dev/api";
 import type { ChatMessage, GenerateRequest, GenerateResponse } from "./types";
 import { getAuthData } from "~encore/auth";
+import { requireFeature } from "../entitlements/middleware";
+import { FEATURES } from "../entitlements/types";
 import db from "../db";
 
 // Generates AI responses using the AI engine service.
 export const generate = api(
   { expose: true, method: "POST", path: "/ai/generate", auth: true },
   async (req: GenerateRequest): Promise<GenerateResponse> => {
+    // Check if user has access to AI generation feature
+    await requireFeature(FEATURES.AI_GENERATION);
+
     if (!req.prompt || typeof req.prompt !== 'string' || req.prompt.trim().length === 0) {
       throw APIError.invalidArgument("Valid prompt is required");
     }
@@ -128,6 +133,9 @@ interface ChatResponse {
 export const chat = api(
   { expose: true, method: "POST", path: "/ai/chat", auth: true },
   async (req: ChatRequest): Promise<ChatResponse> => {
+    // Check if user has access to AI generation feature
+    await requireFeature(FEATURES.AI_GENERATION);
+
     if (!req.messages || !Array.isArray(req.messages) || req.messages.length === 0) {
       throw APIError.invalidArgument("Messages array is required");
     }

@@ -1,6 +1,8 @@
 import { api, APIError } from "encore.dev/api";
 import type { Project, CreateProjectRequest, UpdateProjectRequest } from "./types";
 import { getAuthData } from "~encore/auth";
+import { requireFeature, getUserPlan } from "../entitlements/middleware";
+import { FEATURES } from "../entitlements/types";
 import db from "../db";
 
 interface ProjectRow {
@@ -96,6 +98,24 @@ export const create = api(
     const auth = getAuthData();
     if (!auth) {
       throw APIError.unauthenticated("Authentication required");
+    }
+
+    // Check project limits based on user plan
+    const userPlan = await getUserPlan();
+    if (userPlan === 'free') {
+      // Free users can have max 3 projects
+      const projectCount = await db.queryRow<{ count: number }>`
+        SELECT COUNT(*) as count
+        FROM projects 
+        WHERE owner_id = ${auth.userID} AND status = 'active'
+      `;
+      
+      if (projectCount && projectCount.count >= 3) {
+        throw APIError.permissionDenied("Free plan limited to 3 projects. Upgrade to Pro for unlimited projects.");
+      }
+    } else if (userPlan === 'pro' || userPlan === 'enterprise' || userPlan === 'unlimited') {
+      // Pro/Enterprise/Unlimited plans have unlimited projects
+      await requireFeature(FEATURES.UNLIMITED_PROJECTS);
     }
 
     // Ensure user exists in database
