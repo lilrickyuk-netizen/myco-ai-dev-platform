@@ -1,5 +1,20 @@
 import { APIError } from "encore.dev/api";
-import log from "encore.dev/log";
+
+export interface ErrorContext {
+  requestId?: string;
+  userId?: string;
+  endpoint?: string;
+  method?: string;
+  timestamp: Date;
+}
+
+export interface ErrorDetails {
+  code: string;
+  message: string;
+  details?: any;
+  context?: ErrorContext;
+  stack?: string;
+}
 
 export interface ValidationError {
   field: string;
@@ -7,351 +22,327 @@ export interface ValidationError {
   value?: any;
 }
 
-export interface ErrorDetails {
-  code: string;
-  message: string;
-  details?: any;
-  timestamp: Date;
-  requestId?: string;
-  userId?: string;
-}
-
-export class AppError extends Error {
-  public code: string;
-  public statusCode: number;
-  public details?: any;
-  public isOperational: boolean;
+export class ApplicationError extends Error {
+  public readonly code: string;
+  public readonly statusCode: number;
+  public readonly details?: any;
+  public readonly context?: ErrorContext;
 
   constructor(
-    message: string,
-    code: string = 'INTERNAL_ERROR',
-    statusCode: number = 500,
+    code: string, 
+    message: string, 
+    statusCode: number = 500, 
     details?: any,
-    isOperational: boolean = true
+    context?: ErrorContext
   ) {
     super(message);
-    this.name = 'AppError';
+    this.name = 'ApplicationError';
     this.code = code;
     this.statusCode = statusCode;
     this.details = details;
-    this.isOperational = isOperational;
-
-    Error.captureStackTrace(this, this.constructor);
+    this.context = context;
   }
 }
 
-export class ValidationAppError extends AppError {
-  public validationErrors: ValidationError[];
+export class ValidationErrorCollection extends ApplicationError {
+  public readonly errors: ValidationError[];
 
-  constructor(message: string, validationErrors: ValidationError[]) {
-    super(message, 'VALIDATION_ERROR', 400, { validationErrors });
-    this.name = 'ValidationAppError';
-    this.validationErrors = validationErrors;
+  constructor(errors: ValidationError[], context?: ErrorContext) {
+    const message = `Validation failed: ${errors.map(e => `${e.field}: ${e.message}`).join(', ')}`;
+    super('VALIDATION_ERROR', message, 400, { validationErrors: errors }, context);
+    this.errors = errors;
   }
 }
 
-export class NotFoundError extends AppError {
-  constructor(resource: string, id?: string) {
-    const message = id ? `${resource} with id ${id} not found` : `${resource} not found`;
-    super(message, 'NOT_FOUND', 404);
-    this.name = 'NotFoundError';
+export class BusinessLogicError extends ApplicationError {
+  constructor(message: string, details?: any, context?: ErrorContext) {
+    super('BUSINESS_LOGIC_ERROR', message, 422, details, context);
   }
 }
 
-export class UnauthorizedError extends AppError {
-  constructor(message: string = 'Unauthorized access') {
-    super(message, 'UNAUTHORIZED', 401);
-    this.name = 'UnauthorizedError';
+export class ResourceNotFoundError extends ApplicationError {
+  constructor(resource: string, identifier?: string, context?: ErrorContext) {
+    const message = identifier 
+      ? `${resource} with identifier '${identifier}' not found`
+      : `${resource} not found`;
+    super('RESOURCE_NOT_FOUND', message, 404, { resource, identifier }, context);
   }
 }
 
-export class ForbiddenError extends AppError {
-  constructor(message: string = 'Forbidden access') {
-    super(message, 'FORBIDDEN', 403);
-    this.name = 'ForbiddenError';
+export class PermissionDeniedError extends ApplicationError {
+  constructor(message: string = 'Permission denied', details?: any, context?: ErrorContext) {
+    super('PERMISSION_DENIED', message, 403, details, context);
   }
 }
 
-export class ConflictError extends AppError {
-  constructor(message: string) {
-    super(message, 'CONFLICT', 409);
-    this.name = 'ConflictError';
+export class RateLimitError extends ApplicationError {
+  constructor(limit: number, windowMs: number, context?: ErrorContext) {
+    const message = `Rate limit exceeded: ${limit} requests per ${windowMs}ms`;
+    super('RATE_LIMIT_EXCEEDED', message, 429, { limit, windowMs }, context);
   }
 }
 
-export class RateLimitError extends AppError {
-  constructor(message: string = 'Rate limit exceeded') {
-    super(message, 'RATE_LIMIT_EXCEEDED', 429);
-    this.name = 'RateLimitError';
+export class ExternalServiceError extends ApplicationError {
+  constructor(service: string, originalError: Error, context?: ErrorContext) {
+    super(
+      'EXTERNAL_SERVICE_ERROR', 
+      `External service '${service}' error: ${originalError.message}`,
+      502,
+      { service, originalError: originalError.message },
+      context
+    );
   }
 }
 
-export class ServiceUnavailableError extends AppError {
-  constructor(service: string, message?: string) {
-    const defaultMessage = `${service} service is currently unavailable`;
-    super(message || defaultMessage, 'SERVICE_UNAVAILABLE', 503);
-    this.name = 'ServiceUnavailableError';
+export function handleError(error: Error, context?: ErrorContext): ErrorDetails {
+  const timestamp = new Date();
+  const errorContext = { ...context, timestamp };
+
+  // Handle Encore APIErrors
+  if (error instanceof APIError) {
+    return {
+      code: error.code.toString(),
+      message: error.message,
+      details: error.details,
+      context: errorContext
+    };
+  }
+
+  // Handle custom application errors
+  if (error instanceof ApplicationError) {
+    return {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      context: { ...errorContext, ...error.context },
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    };
+  }
+
+  // Handle validation errors specifically
+  if (error instanceof ValidationErrorCollection) {
+    return {
+      code: error.code,
+      message: error.message,
+      details: {
+        validationErrors: error.errors,
+        ...error.details
+      },
+      context: { ...errorContext, ...error.context }
+    };
+  }
+
+  // Handle database errors
+  if (error.message.includes('duplicate key value violates unique constraint')) {
+    return {
+      code: 'DUPLICATE_RESOURCE',
+      message: 'Resource already exists',
+      details: { originalError: error.message },
+      context: errorContext
+    };
+  }
+
+  if (error.message.includes('foreign key constraint')) {
+    return {
+      code: 'INVALID_REFERENCE',
+      message: 'Referenced resource does not exist',
+      details: { originalError: error.message },
+      context: errorContext
+    };
+  }
+
+  // Handle network/timeout errors
+  if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+    return {
+      code: 'TIMEOUT_ERROR',
+      message: 'Operation timed out',
+      details: { originalError: error.message },
+      context: errorContext
+    };
+  }
+
+  // Handle unknown errors
+  console.error('Unhandled error:', error);
+  
+  return {
+    code: 'INTERNAL_SERVER_ERROR',
+    message: process.env.NODE_ENV === 'development' 
+      ? error.message 
+      : 'An internal server error occurred',
+    details: process.env.NODE_ENV === 'development' 
+      ? { originalError: error.message } 
+      : undefined,
+    context: errorContext,
+    stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+  };
+}
+
+export function throwAPIError(error: Error, context?: ErrorContext): never {
+  const errorDetails = handleError(error, context);
+
+  // Map our error codes to Encore APIError codes
+  switch (errorDetails.code) {
+    case 'VALIDATION_ERROR':
+      throw APIError.invalidArgument(errorDetails.message, errorDetails);
+    
+    case 'RESOURCE_NOT_FOUND':
+      throw APIError.notFound(errorDetails.message, errorDetails);
+    
+    case 'PERMISSION_DENIED':
+      throw APIError.permissionDenied(errorDetails.message, errorDetails);
+    
+    case 'RATE_LIMIT_EXCEEDED':
+      throw APIError.resourceExhausted(errorDetails.message, errorDetails);
+    
+    case 'BUSINESS_LOGIC_ERROR':
+      throw APIError.failedPrecondition(errorDetails.message, errorDetails);
+    
+    case 'DUPLICATE_RESOURCE':
+      throw APIError.alreadyExists(errorDetails.message, errorDetails);
+    
+    case 'INVALID_REFERENCE':
+      throw APIError.invalidArgument(errorDetails.message, errorDetails);
+    
+    case 'TIMEOUT_ERROR':
+      throw APIError.deadlineExceeded(errorDetails.message, errorDetails);
+    
+    case 'EXTERNAL_SERVICE_ERROR':
+      throw APIError.unavailable(errorDetails.message, errorDetails);
+    
+    default:
+      throw APIError.internal(errorDetails.message, errorDetails);
   }
 }
 
-export function handleError(error: any): never {
-  // Log the error
-  log.error('Application error occurred', {
-    error: error.message,
-    stack: error.stack,
-    code: error.code,
-    details: error.details,
-  });
-
-  // Convert to appropriate APIError
-  if (error instanceof ValidationAppError) {
-    throw APIError.invalidArgument(error.message).withDetails(error.details);
-  }
-
-  if (error instanceof NotFoundError) {
-    throw APIError.notFound(error.message);
-  }
-
-  if (error instanceof UnauthorizedError) {
-    throw APIError.unauthenticated(error.message);
-  }
-
-  if (error instanceof ForbiddenError) {
-    throw APIError.permissionDenied(error.message);
-  }
-
-  if (error instanceof ConflictError) {
-    throw APIError.alreadyExists(error.message);
-  }
-
-  if (error instanceof RateLimitError) {
-    throw APIError.resourceExhausted(error.message);
-  }
-
-  if (error instanceof ServiceUnavailableError) {
-    throw APIError.unavailable(error.message);
-  }
-
-  if (error instanceof AppError) {
-    // Generic app error
-    throw APIError.internal(error.message).withDetails(error.details);
-  }
-
-  // Unknown error
-  throw APIError.internal('An unexpected error occurred');
+export function createValidationError(field: string, message: string, value?: any): ValidationError {
+  return { field, message, value };
 }
 
-export function validateRequired(value: any, fieldName: string): void {
+export function validateRequired(value: any, fieldName: string): ValidationError | null {
   if (value === undefined || value === null || value === '') {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} is required` }
-    ]);
+    return createValidationError(fieldName, 'Field is required');
+  }
+  return null;
+}
+
+export function validateEmail(email: string, fieldName: string = 'email'): ValidationError | null {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return createValidationError(fieldName, 'Must be a valid email address', email);
+  }
+  return null;
+}
+
+export function validateLength(
+  value: string, 
+  minLength: number, 
+  maxLength: number, 
+  fieldName: string
+): ValidationError | null {
+  if (value.length < minLength) {
+    return createValidationError(
+      fieldName, 
+      `Must be at least ${minLength} characters long`, 
+      value
+    );
+  }
+  if (value.length > maxLength) {
+    return createValidationError(
+      fieldName, 
+      `Must be no more than ${maxLength} characters long`, 
+      value
+    );
+  }
+  return null;
+}
+
+export function validateEnum(
+  value: string, 
+  allowedValues: string[], 
+  fieldName: string
+): ValidationError | null {
+  if (!allowedValues.includes(value)) {
+    return createValidationError(
+      fieldName, 
+      `Must be one of: ${allowedValues.join(', ')}`, 
+      value
+    );
+  }
+  return null;
+}
+
+export function validateUUID(value: string, fieldName: string): ValidationError | null {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(value)) {
+    return createValidationError(fieldName, 'Must be a valid UUID', value);
+  }
+  return null;
+}
+
+export function collectValidationErrors(errors: (ValidationError | null)[]): ValidationError[] {
+  return errors.filter((error): error is ValidationError => error !== null);
+}
+
+export function validateAndThrow(errors: ValidationError[], context?: ErrorContext): void {
+  if (errors.length > 0) {
+    throw new ValidationErrorCollection(errors, context);
   }
 }
 
-export function validateString(value: any, fieldName: string, options: {
-  minLength?: number;
-  maxLength?: number;
-  pattern?: RegExp;
-} = {}): void {
-  if (typeof value !== 'string') {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be a string` }
-    ]);
-  }
-
-  if (options.minLength && value.length < options.minLength) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be at least ${options.minLength} characters long` }
-    ]);
-  }
-
-  if (options.maxLength && value.length > options.maxLength) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be no more than ${options.maxLength} characters long` }
-    ]);
-  }
-
-  if (options.pattern && !options.pattern.test(value)) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} format is invalid` }
-    ]);
-  }
-}
-
-export function validateNumber(value: any, fieldName: string, options: {
-  min?: number;
-  max?: number;
-  integer?: boolean;
-} = {}): void {
-  if (typeof value !== 'number' || isNaN(value)) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be a number` }
-    ]);
-  }
-
-  if (options.integer && !Number.isInteger(value)) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be an integer` }
-    ]);
-  }
-
-  if (options.min !== undefined && value < options.min) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be at least ${options.min}` }
-    ]);
-  }
-
-  if (options.max !== undefined && value > options.max) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be no more than ${options.max}` }
-    ]);
-  }
-}
-
-export function validateEmail(value: any, fieldName: string): void {
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  validateString(value, fieldName, { pattern: emailPattern });
-}
-
-export function validateUrl(value: any, fieldName: string): void {
-  try {
-    new URL(value);
-  } catch {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be a valid URL` }
-    ]);
-  }
-}
-
-export function validateArray(value: any, fieldName: string, options: {
-  minLength?: number;
-  maxLength?: number;
-  itemValidator?: (item: any, index: number) => void;
-} = {}): void {
-  if (!Array.isArray(value)) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be an array` }
-    ]);
-  }
-
-  if (options.minLength && value.length < options.minLength) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must have at least ${options.minLength} items` }
-    ]);
-  }
-
-  if (options.maxLength && value.length > options.maxLength) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must have no more than ${options.maxLength} items` }
-    ]);
-  }
-
-  if (options.itemValidator) {
-    value.forEach((item, index) => {
-      try {
-        options.itemValidator!(item, index);
-      } catch (error) {
-        if (error instanceof ValidationAppError) {
-          // Re-throw with updated field names
-          const updatedErrors = error.validationErrors.map(err => ({
-            ...err,
-            field: `${fieldName}[${index}].${err.field}`
-          }));
-          throw new ValidationAppError(error.message, updatedErrors);
-        }
+// Error recovery utilities
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delayMs: number = 1000,
+  context?: ErrorContext
+): Promise<T> {
+  let lastError: Error;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      
+      // Don't retry on validation or permission errors
+      if (error instanceof ValidationErrorCollection || 
+          error instanceof PermissionDeniedError ||
+          (error instanceof APIError && 
+           (error.code === 'invalid_argument' || error.code === 'permission_denied'))) {
         throw error;
       }
-    });
-  }
-}
-
-export function validateEnum<T>(value: any, fieldName: string, allowedValues: T[]): void {
-  if (!allowedValues.includes(value)) {
-    throw new ValidationAppError(`Validation failed`, [
-      { 
-        field: fieldName, 
-        message: `${fieldName} must be one of: ${allowedValues.join(', ')}`,
-        value 
-      }
-    ]);
-  }
-}
-
-export function validateObject(value: any, fieldName: string, schema: Record<string, (val: any) => void>): void {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ValidationAppError(`Validation failed`, [
-      { field: fieldName, message: `${fieldName} must be an object` }
-    ]);
-  }
-
-  const errors: ValidationError[] = [];
-
-  for (const [key, validator] of Object.entries(schema)) {
-    try {
-      validator(value[key]);
-    } catch (error) {
-      if (error instanceof ValidationAppError) {
-        const updatedErrors = error.validationErrors.map(err => ({
-          ...err,
-          field: `${fieldName}.${err.field}`
-        }));
-        errors.push(...updatedErrors);
-      } else {
-        errors.push({
-          field: `${fieldName}.${key}`,
-          message: error.message || 'Validation failed'
-        });
+      
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, delayMs * Math.pow(2, attempt)));
       }
     }
   }
-
-  if (errors.length > 0) {
-    throw new ValidationAppError('Validation failed', errors);
-  }
+  
+  throw new ApplicationError(
+    'MAX_RETRIES_EXCEEDED',
+    `Operation failed after ${maxRetries + 1} attempts: ${lastError.message}`,
+    500,
+    { maxRetries, lastError: lastError.message },
+    context
+  );
 }
 
-export function wrapAsyncHandler<T extends any[], R>(
-  handler: (...args: T) => Promise<R>
-): (...args: T) => Promise<R> {
-  return async (...args: T): Promise<R> => {
-    try {
-      return await handler(...args);
-    } catch (error) {
-      handleError(error);
-    }
-  };
-}
+export async function withTimeout<T>(
+  operation: () => Promise<T>,
+  timeoutMs: number,
+  context?: ErrorContext
+): Promise<T> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new ApplicationError(
+        'OPERATION_TIMEOUT',
+        `Operation timed out after ${timeoutMs}ms`,
+        408,
+        { timeoutMs },
+        context
+      ));
+    }, timeoutMs);
+  });
 
-export function createValidator<T>(schema: Record<keyof T, (value: any) => void>) {
-  return (data: any): T => {
-    if (typeof data !== 'object' || data === null) {
-      throw new ValidationAppError('Validation failed', [
-        { field: 'root', message: 'Data must be an object' }
-      ]);
-    }
-
-    const errors: ValidationError[] = [];
-
-    for (const [field, validator] of Object.entries(schema)) {
-      try {
-        validator(data[field]);
-      } catch (error) {
-        if (error instanceof ValidationAppError) {
-          errors.push(...error.validationErrors);
-        } else {
-          errors.push({
-            field: field,
-            message: error.message || 'Validation failed'
-          });
-        }
-      }
-    }
-
-    if (errors.length > 0) {
-      throw new ValidationAppError('Validation failed', errors);
-    }
-
-    return data as T;
-  };
+  return Promise.race([operation(), timeoutPromise]);
 }

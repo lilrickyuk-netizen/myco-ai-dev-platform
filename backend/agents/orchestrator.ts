@@ -1,8 +1,18 @@
 import { api, APIError } from "encore.dev/api";
 import { getAuthData } from "~encore/auth";
+import { SQLDatabase } from "encore.dev/storage/sqldb";
 import { agentsDB } from "./db";
-import { projectsDB } from "../projects/db";
-import { AgentSession, AgentTask, Agent, ProjectGenerationRequest } from "./types";
+import { 
+  AgentSession, 
+  AgentTask, 
+  AgentSessionStatus, 
+  AgentTaskStatus,
+  OrchestrationRequest,
+  OrchestrationResponse 
+} from "./types";
+
+// Reference the projects database
+const projectsDB = SQLDatabase.named("projects");
 
 export interface CreateSessionRequest {
   projectId: string;
@@ -10,447 +20,356 @@ export interface CreateSessionRequest {
   request: Record<string, any>;
 }
 
-export interface GetSessionParams {
-  id: string;
-}
-
-export interface ListSessionsParams {
-  projectId: string;
-}
-
-export interface ListSessionsResponse {
-  sessions: AgentSession[];
-}
-
-export interface GetTasksParams {
+export interface UpdateSessionRequest {
   sessionId: string;
+  status?: AgentSessionStatus;
+  progress?: Record<string, any>;
+  response?: Record<string, any>;
+  errorMessage?: string;
 }
 
-export interface GetTasksResponse {
-  tasks: AgentTask[];
+export interface CreateTaskRequest {
+  sessionId: string;
+  agentName: string;
+  taskType: string;
+  input: Record<string, any>;
+  dependencies?: string[];
 }
 
-export interface ListAgentsResponse {
-  agents: Agent[];
+export interface UpdateTaskRequest {
+  taskId: string;
+  status?: AgentTaskStatus;
+  output?: Record<string, any>;
+  progress?: number;
+  errorMessage?: string;
 }
 
-// Creates a new agent session.
-export const createSession = api<CreateSessionRequest, AgentSession>(
+export const createSession = api<CreateSessionRequest, { sessionId: string }>(
   { auth: true, expose: true, method: "POST", path: "/agents/sessions" },
   async (req) => {
     const auth = getAuthData()!;
 
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${req.projectId} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
+    if (!req.projectId || !req.type) {
+      throw APIError.invalidArgument("Project ID and type are required");
     }
 
-    // Create the session
-    const session = await agentsDB.queryRow<AgentSession>`
-      INSERT INTO agent_sessions (project_id, user_id, type, request, status, progress)
-      VALUES (
-        ${req.projectId}, 
-        ${auth.userID}, 
-        ${req.type}, 
-        ${JSON.stringify(req.request)}, 
-        'pending',
-        ${JSON.stringify({ totalTasks: 0, completedTasks: 0, percentage: 0 })}
-      )
-      RETURNING 
-        id,
-        project_id as "projectId",
-        user_id as "userId",
-        type,
-        status,
-        request,
-        response,
-        progress,
-        error_message as "errorMessage",
-        started_at as "startedAt",
-        completed_at as "completedAt",
-        updated_at as "updatedAt"
+    // Verify project ownership
+    const project = await projectsDB.queryRow`
+      SELECT id FROM projects WHERE id = ${req.projectId} AND user_id = ${auth.userID}
+    `;
+    
+    if (!project) {
+      throw APIError.notFound("Project not found or access denied");
+    }
+
+    const session = await agentsDB.queryRow<{ id: string }>`
+      INSERT INTO agent_sessions (project_id, user_id, type, status, request, progress)
+      VALUES (${req.projectId}, ${auth.userID}, ${req.type}, 'pending', ${JSON.stringify(req.request)}, '{}')
+      RETURNING id
     `;
 
     if (!session) {
       throw APIError.internal("Failed to create session");
     }
 
-    // Start orchestration process
-    startOrchestration(session.id, req.type, req.request);
-
-    return {
-      ...session,
-      request: typeof session.request === 'string' ? JSON.parse(session.request) : session.request,
-      progress: typeof session.progress === 'string' ? JSON.parse(session.progress) : session.progress,
-    };
+    return { sessionId: session.id };
   }
 );
 
-// Gets a specific session by ID.
-export const getSession = api<GetSessionParams, AgentSession>(
-  { auth: true, expose: true, method: "GET", path: "/agents/sessions/:id" },
-  async ({ id }) => {
+export const updateSession = api<UpdateSessionRequest, { success: boolean }>(
+  { auth: true, expose: true, method: "PUT", path: "/agents/sessions/:sessionId" },
+  async (req) => {
     const auth = getAuthData()!;
 
-    const session = await agentsDB.queryRow<AgentSession>`
-      SELECT 
-        id,
-        project_id as "projectId",
-        user_id as "userId",
-        type,
-        status,
-        request,
-        response,
-        progress,
-        error_message as "errorMessage",
-        started_at as "startedAt",
-        completed_at as "completedAt",
-        updated_at as "updatedAt"
-      FROM agent_sessions 
-      WHERE id = ${id}
-    `;
-
-    if (!session) {
-      throw APIError.notFound("Session not found");
+    if (!req.sessionId) {
+      throw APIError.invalidArgument("Session ID is required");
     }
 
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${session.projectId} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
-    }
-
-    return {
-      ...session,
-      request: typeof session.request === 'string' ? JSON.parse(session.request) : session.request,
-      response: session.response ? (typeof session.response === 'string' ? JSON.parse(session.response) : session.response) : undefined,
-      progress: typeof session.progress === 'string' ? JSON.parse(session.progress) : session.progress,
-    };
-  }
-);
-
-// Lists all sessions for a project.
-export const listSessions = api<ListSessionsParams, ListSessionsResponse>(
-  { auth: true, expose: true, method: "GET", path: "/agents/sessions/project/:projectId" },
-  async ({ projectId }) => {
-    const auth = getAuthData()!;
-
-    // Verify user has access to the project
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${projectId} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
-    }
-
-    const sessions: AgentSession[] = [];
-    
-    for await (const row of agentsDB.query<AgentSession>`
-      SELECT 
-        id,
-        project_id as "projectId",
-        user_id as "userId",
-        type,
-        status,
-        request,
-        response,
-        progress,
-        error_message as "errorMessage",
-        started_at as "startedAt",
-        completed_at as "completedAt",
-        updated_at as "updatedAt"
-      FROM agent_sessions 
-      WHERE project_id = ${projectId}
-      ORDER BY started_at DESC
-    `) {
-      sessions.push({
-        ...row,
-        request: typeof row.request === 'string' ? JSON.parse(row.request) : row.request,
-        response: row.response ? (typeof row.response === 'string' ? JSON.parse(row.response) : row.response) : undefined,
-        progress: typeof row.progress === 'string' ? JSON.parse(row.progress) : row.progress,
-      });
-    }
-
-    return { sessions };
-  }
-);
-
-// Gets tasks for a session.
-export const getTasks = api<GetTasksParams, GetTasksResponse>(
-  { auth: true, expose: true, method: "GET", path: "/agents/sessions/:sessionId/tasks" },
-  async ({ sessionId }) => {
-    const auth = getAuthData()!;
-
-    // Verify session exists and user has access
+    // Verify session ownership
     const session = await agentsDB.queryRow`
-      SELECT project_id FROM agent_sessions WHERE id = ${sessionId}
+      SELECT id FROM agent_sessions 
+      WHERE id = ${req.sessionId} AND user_id = ${auth.userID}
+    `;
+    
+    if (!session) {
+      throw APIError.notFound("Session not found or access denied");
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (req.status) {
+      updates.push(`status = $${paramIndex++}`);
+      values.push(req.status);
+    }
+
+    if (req.progress) {
+      updates.push(`progress = $${paramIndex++}`);
+      values.push(JSON.stringify(req.progress));
+    }
+
+    if (req.response) {
+      updates.push(`response = $${paramIndex++}`);
+      values.push(JSON.stringify(req.response));
+    }
+
+    if (req.errorMessage) {
+      updates.push(`error_message = $${paramIndex++}`);
+      values.push(req.errorMessage);
+    }
+
+    if (req.status === 'completed' || req.status === 'failed') {
+      updates.push(`completed_at = NOW()`);
+    }
+
+    updates.push(`updated_at = NOW()`);
+
+    if (updates.length === 1) {
+      throw APIError.invalidArgument("No valid fields to update");
+    }
+
+    values.push(req.sessionId);
+    const query = `
+      UPDATE agent_sessions 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+    `;
+
+    await agentsDB.exec(query, ...values);
+    return { success: true };
+  }
+);
+
+export const getSession = api<{ sessionId: string }, AgentSession | null>(
+  { auth: true, expose: true, method: "GET", path: "/agents/sessions/:sessionId" },
+  async (req) => {
+    const auth = getAuthData()!;
+
+    const session = await agentsDB.queryRow<{
+      id: string;
+      project_id: string;
+      user_id: string;
+      type: string;
+      status: AgentSessionStatus;
+      request: string;
+      response: string | null;
+      progress: string;
+      error_message: string | null;
+      started_at: Date;
+      completed_at: Date | null;
+      updated_at: Date;
+    }>`
+      SELECT 
+        id, project_id, user_id, type, status, request, response, 
+        progress, error_message, started_at, completed_at, updated_at
+      FROM agent_sessions 
+      WHERE id = ${req.sessionId} AND user_id = ${auth.userID}
     `;
 
     if (!session) {
-      throw APIError.notFound("Session not found");
+      return null;
     }
 
-    const project = await projectsDB.queryRow`
-      SELECT id FROM projects 
-      WHERE id = ${session.project_id} AND user_id = ${auth.userID}
-    `;
-
-    if (!project) {
-      throw APIError.notFound("Project not found");
-    }
-
-    const tasks: AgentTask[] = [];
-    
-    for await (const row of agentsDB.query<AgentTask>`
+    // Get tasks for this session
+    const tasks = await agentsDB.query<{
+      id: string;
+      agent_name: string;
+      task_type: string;
+      status: AgentTaskStatus;
+      input: string;
+      output: string | null;
+      progress: number;
+      error_message: string | null;
+      started_at: Date | null;
+      completed_at: Date | null;
+      created_at: Date;
+    }>`
       SELECT 
-        id,
-        session_id as "sessionId",
-        agent_name as "agentName",
-        task_type as "taskType",
-        status,
-        input,
-        output,
-        dependencies,
-        progress,
-        error_message as "errorMessage",
-        started_at as "startedAt",
-        completed_at as "completedAt",
-        created_at as "createdAt"
+        id, agent_name, task_type, status, input, output, 
+        progress, error_message, started_at, completed_at, created_at
       FROM agent_tasks 
-      WHERE session_id = ${sessionId}
+      WHERE session_id = ${session.id}
       ORDER BY created_at ASC
-    `) {
-      tasks.push({
-        ...row,
-        input: typeof row.input === 'string' ? JSON.parse(row.input) : row.input,
-        output: row.output ? (typeof row.output === 'string' ? JSON.parse(row.output) : row.output) : undefined,
-      });
+    `;
+
+    return {
+      id: session.id,
+      projectId: session.project_id,
+      userId: session.user_id,
+      status: session.status,
+      agents: [], // TODO: Implement actual agent loading
+      tasks: tasks.map(task => ({
+        id: task.id,
+        agentType: task.agent_name,
+        taskType: task.task_type,
+        description: task.task_type,
+        status: task.status,
+        progressPercentage: task.progress,
+        startedAt: task.started_at,
+        completedAt: task.completed_at
+      })),
+      startedAt: session.started_at,
+      completedAt: session.completed_at,
+      configuration: JSON.parse(session.request),
+      results: session.response ? JSON.parse(session.response) : undefined
+    };
+  }
+);
+
+export const createTask = api<CreateTaskRequest, { taskId: string }>(
+  { auth: true, expose: true, method: "POST", path: "/agents/tasks" },
+  async (req) => {
+    const auth = getAuthData()!;
+
+    if (!req.sessionId || !req.agentName || !req.taskType) {
+      throw APIError.invalidArgument("Session ID, agent name, and task type are required");
     }
 
-    return { tasks };
-  }
-);
+    // Verify session ownership
+    const session = await agentsDB.queryRow`
+      SELECT id FROM agent_sessions 
+      WHERE id = ${req.sessionId} AND user_id = ${auth.userID}
+    `;
+    
+    if (!session) {
+      throw APIError.notFound("Session not found or access denied");
+    }
 
-// Lists available agents.
-export const listAgents = api<void, ListAgentsResponse>(
-  { auth: true, expose: true, method: "GET", path: "/agents/list" },
-  async () => {
-    const agents: Agent[] = [
-      {
-        name: "orchestrator",
-        displayName: "Orchestrator Agent",
-        description: "Master coordinator for project generation and task management",
-        capabilities: ["task_planning", "resource_allocation", "progress_monitoring"],
-        supportedTaskTypes: ["orchestrate", "plan", "coordinate"],
-        dependencies: [],
-        estimatedDuration: 30
-      },
-      {
-        name: "planner",
-        displayName: "Planner Agent",
-        description: "Requirements analysis and task planning specialist",
-        capabilities: ["requirements_analysis", "task_breakdown", "timeline_estimation"],
-        supportedTaskTypes: ["analyze_requirements", "create_plan", "estimate_effort"],
-        dependencies: [],
-        estimatedDuration: 120
-      },
-      {
-        name: "architect",
-        displayName: "Architecture Agent",
-        description: "System design and architecture decision specialist",
-        capabilities: ["system_design", "architecture_patterns", "technology_selection"],
-        supportedTaskTypes: ["design_architecture", "select_technologies", "create_adr"],
-        dependencies: ["planner"],
-        estimatedDuration: 180
-      },
-      {
-        name: "backend",
-        displayName: "Backend Agent",
-        description: "Complete backend code generation specialist",
-        capabilities: ["api_development", "database_design", "service_architecture"],
-        supportedTaskTypes: ["generate_api", "design_database", "implement_services"],
-        dependencies: ["architect"],
-        estimatedDuration: 300
-      },
-      {
-        name: "frontend",
-        displayName: "Frontend Agent",
-        description: "Full frontend application generation specialist",
-        capabilities: ["ui_development", "component_design", "state_management"],
-        supportedTaskTypes: ["generate_ui", "create_components", "implement_features"],
-        dependencies: ["architect", "backend"],
-        estimatedDuration: 240
-      },
-      {
-        name: "infrastructure",
-        displayName: "Infrastructure Agent",
-        description: "DevOps, IaC, Kubernetes, and deployment specialist",
-        capabilities: ["containerization", "orchestration", "ci_cd", "monitoring"],
-        supportedTaskTypes: ["create_dockerfile", "setup_kubernetes", "configure_ci_cd"],
-        dependencies: ["backend", "frontend"],
-        estimatedDuration: 180
-      },
-      {
-        name: "security",
-        displayName: "Security Agent",
-        description: "Vulnerability scanning, hardening, and compliance specialist",
-        capabilities: ["vulnerability_scanning", "security_hardening", "compliance_checks"],
-        supportedTaskTypes: ["scan_vulnerabilities", "apply_security", "check_compliance"],
-        dependencies: ["backend", "frontend", "infrastructure"],
-        estimatedDuration: 150
-      },
-      {
-        name: "verifier",
-        displayName: "Verifier Agent",
-        description: "Quality assurance and completeness checking specialist",
-        capabilities: ["code_review", "completeness_check", "quality_metrics"],
-        supportedTaskTypes: ["review_code", "check_completeness", "generate_metrics"],
-        dependencies: ["backend", "frontend", "security"],
-        estimatedDuration: 120
-      },
-      {
-        name: "deployer",
-        displayName: "Deployer Agent",
-        description: "Multi-cloud deployment automation specialist",
-        capabilities: ["cloud_deployment", "environment_setup", "health_monitoring"],
-        supportedTaskTypes: ["deploy_application", "setup_environment", "monitor_health"],
-        dependencies: ["verifier"],
-        estimatedDuration: 180
-      },
-      {
-        name: "documenter",
-        displayName: "Documenter Agent",
-        description: "API docs, tutorials, and README generation specialist",
-        capabilities: ["api_documentation", "tutorial_creation", "readme_generation"],
-        supportedTaskTypes: ["generate_api_docs", "create_tutorials", "write_readme"],
-        dependencies: ["backend", "frontend"],
-        estimatedDuration: 90
-      }
-    ];
-
-    return { agents };
-  }
-);
-
-// Helper function to start orchestration process
-async function startOrchestration(sessionId: string, type: string, request: Record<string, any>) {
-  // Update session status to running
-  await agentsDB.exec`
-    UPDATE agent_sessions 
-    SET status = 'running', updated_at = NOW()
-    WHERE id = ${sessionId}
-  `;
-
-  // Create tasks based on session type
-  const tasks = createTasksForSessionType(type, request);
-  
-  // Create task records
-  for (const task of tasks) {
-    await agentsDB.exec`
+    const task = await agentsDB.queryRow<{ id: string }>`
       INSERT INTO agent_tasks (session_id, agent_name, task_type, input, dependencies)
-      VALUES (${sessionId}, ${task.agentName}, ${task.taskType}, ${JSON.stringify(task.input)}, ${task.dependencies})
+      VALUES (
+        ${req.sessionId}, 
+        ${req.agentName}, 
+        ${req.taskType}, 
+        ${JSON.stringify(req.input)},
+        ${req.dependencies || []}
+      )
+      RETURNING id
     `;
-  }
 
-  // Update progress
-  await updateSessionProgress(sessionId, tasks.length, 0);
-
-  // Start executing tasks (this would be implemented with actual agent coordination)
-  executeTasksPipeline(sessionId, tasks);
-}
-
-function createTasksForSessionType(type: string, request: Record<string, any>) {
-  if (type === 'project_generation') {
-    return [
-      { agentName: 'planner', taskType: 'analyze_requirements', input: request, dependencies: [] },
-      { agentName: 'architect', taskType: 'design_architecture', input: request, dependencies: ['planner'] },
-      { agentName: 'backend', taskType: 'generate_api', input: request, dependencies: ['architect'] },
-      { agentName: 'frontend', taskType: 'generate_ui', input: request, dependencies: ['architect'] },
-      { agentName: 'infrastructure', taskType: 'setup_kubernetes', input: request, dependencies: ['backend', 'frontend'] },
-      { agentName: 'security', taskType: 'scan_vulnerabilities', input: request, dependencies: ['backend', 'frontend'] },
-      { agentName: 'verifier', taskType: 'check_completeness', input: request, dependencies: ['backend', 'frontend', 'security'] },
-      { agentName: 'deployer', taskType: 'deploy_application', input: request, dependencies: ['verifier'] },
-      { agentName: 'documenter', taskType: 'generate_api_docs', input: request, dependencies: ['backend', 'frontend'] },
-    ];
-  }
-  
-  return [];
-}
-
-async function updateSessionProgress(sessionId: string, total: number, completed: number) {
-  const progress = {
-    totalTasks: total,
-    completedTasks: completed,
-    percentage: Math.round((completed / total) * 100),
-  };
-
-  await agentsDB.exec`
-    UPDATE agent_sessions 
-    SET progress = ${JSON.stringify(progress)}, updated_at = NOW()
-    WHERE id = ${sessionId}
-  `;
-}
-
-// Mock implementation of task execution pipeline
-async function executeTasksPipeline(sessionId: string, tasks: any[]) {
-  // Real implementation of agent coordination logic
-  try {
-    for (const task of tasks) {
-      await updateSessionProgress(sessionId, tasks.length, tasks.indexOf(task));
-      
-      // Call AI engine to execute the task
-      const response = await fetch(`${process.env.AI_ENGINE_URL || 'http://localhost:8001'}/api/v1/agents/execute`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.AI_ENGINE_API_KEY || 'dev-key'}`
-        },
-        body: JSON.stringify({
-          sessionId,
-          task,
-          agentType: task.agentName
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Agent execution failed: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      // Store task result
-      await agentsDB.exec`
-        INSERT INTO agent_task_results (session_id, task_name, result, created_at)
-        VALUES (${sessionId}, ${task.agentName}, ${JSON.stringify(result)}, NOW())
-      `;
+    if (!task) {
+      throw APIError.internal("Failed to create task");
     }
-    
-    // Mark session as completed
-    await agentsDB.exec`
-      UPDATE agent_sessions 
-      SET status = 'completed', completed_at = NOW(), updated_at = NOW()
-      WHERE id = ${sessionId}
-    `;
-    
-  } catch (error) {
-    console.error('Task pipeline execution failed:', error);
-    
-    // Mark session as failed
-    await agentsDB.exec`
-      UPDATE agent_sessions 
-      SET status = 'failed', error_message = ${error.message}, completed_at = NOW(), updated_at = NOW()
-      WHERE id = ${sessionId}
-    `;
+
+    return { taskId: task.id };
   }
-}
+);
+
+export const updateTask = api<UpdateTaskRequest, { success: boolean }>(
+  { auth: true, expose: true, method: "PUT", path: "/agents/tasks/:taskId" },
+  async (req) => {
+    const auth = getAuthData()!;
+
+    if (!req.taskId) {
+      throw APIError.invalidArgument("Task ID is required");
+    }
+
+    // Verify task ownership through session
+    const task = await agentsDB.queryRow`
+      SELECT t.id 
+      FROM agent_tasks t
+      JOIN agent_sessions s ON t.session_id = s.id
+      WHERE t.id = ${req.taskId} AND s.user_id = ${auth.userID}
+    `;
+    
+    if (!task) {
+      throw APIError.notFound("Task not found or access denied");
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (req.status) {
+      updates.push(`status = $${paramIndex++}`);
+      values.push(req.status);
+      
+      if (req.status === 'running' || req.status === 'in_progress') {
+        updates.push(`started_at = COALESCE(started_at, NOW())`);
+      } else if (req.status === 'completed' || req.status === 'failed') {
+        updates.push(`completed_at = NOW()`);
+      }
+    }
+
+    if (req.output) {
+      updates.push(`output = $${paramIndex++}`);
+      values.push(JSON.stringify(req.output));
+    }
+
+    if (req.progress !== undefined) {
+      updates.push(`progress = $${paramIndex++}`);
+      values.push(req.progress);
+    }
+
+    if (req.errorMessage) {
+      updates.push(`error_message = $${paramIndex++}`);
+      values.push(req.errorMessage);
+    }
+
+    if (updates.length === 0) {
+      throw APIError.invalidArgument("No valid fields to update");
+    }
+
+    values.push(req.taskId);
+    const query = `
+      UPDATE agent_tasks 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+    `;
+
+    await agentsDB.exec(query, ...values);
+    return { success: true };
+  }
+);
+
+export const listSessions = api<{ projectId?: string }, AgentSession[]>(
+  { auth: true, expose: true, method: "GET", path: "/agents/sessions" },
+  async (req) => {
+    const auth = getAuthData()!;
+
+    let query = `
+      SELECT 
+        id, project_id, user_id, type, status, request, response, 
+        progress, error_message, started_at, completed_at, updated_at
+      FROM agent_sessions 
+      WHERE user_id = $1
+    `;
+    const params: any[] = [auth.userID];
+
+    if (req.projectId) {
+      query += ` AND project_id = $2`;
+      params.push(req.projectId);
+    }
+
+    query += ` ORDER BY started_at DESC`;
+
+    const sessions = await agentsDB.query<{
+      id: string;
+      project_id: string;
+      user_id: string;
+      type: string;
+      status: AgentSessionStatus;
+      request: string;
+      response: string | null;
+      progress: string;
+      error_message: string | null;
+      started_at: Date;
+      completed_at: Date | null;
+      updated_at: Date;
+    }>(query, ...params);
+
+    return sessions.map(session => ({
+      id: session.id,
+      projectId: session.project_id,
+      userId: session.user_id,
+      status: session.status,
+      agents: [],
+      tasks: [],
+      startedAt: session.started_at,
+      completedAt: session.completed_at,
+      configuration: JSON.parse(session.request),
+      results: session.response ? JSON.parse(session.response) : undefined
+    }));
+  }
+);
