@@ -123,7 +123,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]`,
-        'src/main.rs': '// Placeholder - will be replaced with user code'
+        'src/main.rs': 'fn main() {\n    println!("Hello, World!");\n}'
       }
     },
     java: {

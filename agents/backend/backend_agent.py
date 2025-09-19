@@ -415,42 +415,414 @@ export const {endpoint_name} = api<{endpoint_name.capitalize()}Request, {endpoin
   }}
 );'''
     
-    # Placeholder methods for other framework structures
     async def _generate_fastapi_structure(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
-        return {"directories": [], "files": []}
+        """Generate FastAPI project structure"""
+        return {
+            "directories": [
+                "app/",
+                "app/api/",
+                "app/api/v1/",
+                "app/api/v1/endpoints/",
+                "app/core/",
+                "app/models/",
+                "app/schemas/",
+                "app/services/",
+                "app/db/",
+                "tests/"
+            ],
+            "files": [
+                {
+                    "path": "main.py",
+                    "content": self._generate_fastapi_main_file(requirements),
+                    "description": "FastAPI application entry point"
+                },
+                {
+                    "path": "requirements.txt",
+                    "content": self._generate_fastapi_requirements(requirements),
+                    "description": "Python dependencies"
+                }
+            ]
+        }
     
     async def _generate_generic_structure(self, framework: str, requirements: Dict[str, Any]) -> Dict[str, Any]:
-        return {"directories": [], "files": []}
+        """Generate generic project structure for unknown frameworks"""
+        return {
+            "directories": [
+                "src/",
+                "tests/",
+                "docs/",
+                "config/"
+            ],
+            "files": [
+                {
+                    "path": "README.md",
+                    "content": f"# {requirements.get('name', 'Project')}\n\nGenerated {framework} project structure",
+                    "description": "Project documentation"
+                }
+            ]
+        }
     
     async def _generate_api_endpoints(self, requirements: Dict[str, Any], framework: str) -> List[Dict]:
-        return []
+        """Generate API endpoints based on requirements"""
+        endpoints = []
+        entities = requirements.get("entities", ["users", "projects"])
+        
+        for entity in entities:
+            endpoints.extend([
+                {"name": f"get_{entity}", "method": "GET", "path": f"/{entity}/{{id}}", "description": f"Get {entity} by ID"},
+                {"name": f"list_{entity}", "method": "GET", "path": f"/{entity}", "description": f"List all {entity}"},
+                {"name": f"create_{entity}", "method": "POST", "path": f"/{entity}", "description": f"Create new {entity}"},
+                {"name": f"update_{entity}", "method": "PUT", "path": f"/{entity}/{{id}}", "description": f"Update {entity}"},
+                {"name": f"delete_{entity}", "method": "DELETE", "path": f"/{entity}/{{id}}", "description": f"Delete {entity}"}
+            ])
+        
+        return endpoints
     
     async def _generate_database_models(self, requirements: Dict[str, Any]) -> List[Dict]:
-        return []
+        """Generate database models based on requirements"""
+        models = []
+        entities = requirements.get("entities", ["users", "projects"])
+        
+        for entity in entities:
+            models.append({
+                "name": entity.capitalize(),
+                "table": entity,
+                "fields": self._get_entity_fields(entity),
+                "relationships": self._get_entity_relationships(entity, entities)
+            })
+        
+        return models
     
     async def _generate_auth_system(self, framework: str, requirements: Dict[str, Any]) -> Dict[str, Any]:
-        return {}
+        """Generate authentication system configuration"""
+        return {
+            "type": "jwt",
+            "provider": requirements.get("auth_provider", "local"),
+            "features": [
+                "registration",
+                "login",
+                "logout", 
+                "password_reset",
+                "email_verification"
+            ],
+            "middleware": True,
+            "refresh_tokens": True,
+            "session_management": True
+        }
     
     async def _generate_middleware(self, framework: str, requirements: Dict[str, Any]) -> List[Dict]:
-        return []
+        """Generate middleware configuration"""
+        middleware = [
+            {"name": "cors", "description": "Cross-Origin Resource Sharing"},
+            {"name": "helmet", "description": "Security headers"},
+            {"name": "compression", "description": "Response compression"},
+            {"name": "rate_limit", "description": "Rate limiting"},
+            {"name": "logging", "description": "Request logging"}
+        ]
+        
+        if requirements.get("authentication", True):
+            middleware.append({"name": "auth", "description": "Authentication middleware"})
+        
+        return middleware
     
     async def _generate_backend_tests(self, framework: str, api_endpoints: List[Dict]) -> List[Dict]:
-        return []
+        """Generate test files for backend"""
+        tests = []
+        
+        for endpoint in api_endpoints:
+            tests.append({
+                "file": f"test_{endpoint['name']}.test.ts",
+                "type": "integration",
+                "description": f"Tests for {endpoint['name']} endpoint"
+            })
+        
+        tests.extend([
+            {"file": "auth.test.ts", "type": "unit", "description": "Authentication tests"},
+            {"file": "database.test.ts", "type": "integration", "description": "Database tests"},
+            {"file": "middleware.test.ts", "type": "unit", "description": "Middleware tests"}
+        ])
+        
+        return tests
     
     async def _generate_backend_config(self, framework: str, requirements: Dict[str, Any]) -> Dict[str, Any]:
-        return {}
+        """Generate backend configuration"""
+        return {
+            "database": {
+                "type": requirements.get("database_type", "postgresql"),
+                "host": "localhost",
+                "port": 5432,
+                "migrations": True,
+                "seeding": True
+            },
+            "cache": {
+                "type": "redis",
+                "host": "localhost",
+                "port": 6379
+            },
+            "server": {
+                "port": 3001,
+                "cors": True,
+                "rate_limiting": True
+            },
+            "logging": {
+                "level": "info",
+                "format": "json"
+            }
+        }
     
     def _generate_express_server_file(self) -> str:
-        return "// Express server file"
+        """Generate Express server entry point"""
+        return '''import app from './app';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const PORT = process.env.PORT || 3001;
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+});
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  process.exit(0);
+});'''
     
     def _generate_typescript_config(self) -> str:
-        return "{}"
+        """Generate TypeScript configuration"""
+        return '''{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "declaration": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests"]
+}'''
     
     def _generate_env_template(self, requirements: Dict[str, Any]) -> str:
-        return "# Environment variables"
+        """Generate environment variables template"""
+        return '''# Server Configuration
+NODE_ENV=development
+PORT=3001
+
+# Database Configuration
+DATABASE_URL=postgresql://user:password@localhost:5432/myapp
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=myapp
+DATABASE_USER=user
+DATABASE_PASSWORD=password
+
+# Redis Configuration
+REDIS_URL=redis://localhost:6379
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Authentication
+JWT_SECRET=your-super-secret-jwt-key-change-in-production
+JWT_EXPIRES_IN=24h
+REFRESH_TOKEN_SECRET=your-refresh-token-secret
+REFRESH_TOKEN_EXPIRES_IN=7d
+
+# External APIs
+OPENAI_API_KEY=sk-your-openai-api-key
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+
+# Security
+BCRYPT_ROUNDS=12
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+
+# Logging
+LOG_LEVEL=info
+LOG_FORMAT=json'''
     
     def _generate_database_connection(self) -> str:
-        return "// Database connection"
+        """Generate database connection setup"""
+        return '''import { Pool } from 'pg';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const pool = new Pool({
+  host: process.env.DATABASE_HOST || 'localhost',
+  port: parseInt(process.env.DATABASE_PORT || '5432'),
+  database: process.env.DATABASE_NAME || 'myapp',
+  user: process.env.DATABASE_USER || 'user',
+  password: process.env.DATABASE_PASSWORD || 'password',
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle client', err);
+  process.exit(-1);
+});
+
+export default pool;
+
+export const query = (text: string, params?: any[]) => {
+  return pool.query(text, params);
+};
+
+export const getClient = () => {
+  return pool.connect();
+};'''
     
     def _generate_auth_middleware(self) -> str:
-        return "// Auth middleware"
+        """Generate authentication middleware"""
+        return '''import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+
+interface AuthRequest extends Request {
+  user?: any;
+}
+
+export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET!, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    
+    req.user = user;
+    next();
+  });
+};
+
+export const optionalAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (token) {
+    jwt.verify(token, process.env.JWT_SECRET!, (err, user) => {
+      if (!err) {
+        req.user = user;
+      }
+    });
+  }
+  
+  next();
+};'''
+    
+    def _generate_fastapi_main_file(self, requirements: Dict[str, Any]) -> str:
+        """Generate FastAPI main application file"""
+        return '''from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.v1 import api_router
+from app.core.config import settings
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    description="API for """ + requirements.get('name', 'Application') + '''"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_HOSTS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(api_router, prefix="/api/v1")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "version": settings.VERSION}'''
+    
+    def _generate_fastapi_requirements(self, requirements: Dict[str, Any]) -> str:
+        """Generate FastAPI requirements.txt"""
+        return '''fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+sqlalchemy==2.0.23
+alembic==1.13.1
+psycopg2-binary==2.9.9
+redis==5.0.1
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+email-validator==2.1.0
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2'''
+    
+    def _get_entity_fields(self, entity: str) -> List[Dict]:
+        """Get fields for a database entity"""
+        common_fields = [
+            {"name": "id", "type": "uuid", "primary": True},
+            {"name": "created_at", "type": "timestamp", "default": "now()"},
+            {"name": "updated_at", "type": "timestamp", "default": "now()"}
+        ]
+        
+        if entity == "users":
+            return common_fields + [
+                {"name": "email", "type": "string", "unique": True, "required": True},
+                {"name": "password_hash", "type": "string", "required": True},
+                {"name": "first_name", "type": "string"},
+                {"name": "last_name", "type": "string"},
+                {"name": "is_active", "type": "boolean", "default": True}
+            ]
+        elif entity == "projects":
+            return common_fields + [
+                {"name": "name", "type": "string", "required": True},
+                {"name": "description", "type": "text"},
+                {"name": "owner_id", "type": "uuid", "foreign_key": "users.id"},
+                {"name": "status", "type": "string", "default": "active"}
+            ]
+        else:
+            return common_fields + [
+                {"name": "name", "type": "string", "required": True},
+                {"name": "description", "type": "text"}
+            ]
+    
+    def _get_entity_relationships(self, entity: str, all_entities: List[str]) -> List[Dict]:
+        """Get relationships for a database entity"""
+        relationships = []
+        
+        if entity == "users" and "projects" in all_entities:
+            relationships.append({
+                "type": "has_many",
+                "target": "projects",
+                "foreign_key": "owner_id"
+            })
+        elif entity == "projects" and "users" in all_entities:
+            relationships.append({
+                "type": "belongs_to",
+                "target": "users",
+                "foreign_key": "owner_id"
+            })
+        
+        return relationships
