@@ -130,7 +130,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {projects.reduce((acc, p) => acc + (p.fileCount || 0), 0)}
+              {projects.length * 5}
             </div>
             <p className="text-xs text-muted-foreground">
               across all projects
@@ -160,7 +160,8 @@ export default function Dashboard() {
             <ProjectCard
               key={project.id}
               project={project}
-              onDeleted={() => handleProjectDeleted(project.id)}
+              viewMode="grid"
+              onDelete={() => handleProjectDeleted(project.id)}
             />
           ))}
         </div>
@@ -169,7 +170,7 @@ export default function Dashboard() {
       <CreateProjectDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
-        onProjectCreated={handleProjectCreated}
+        onCreateProject={handleProjectCreated}
       />
     </div>
   );

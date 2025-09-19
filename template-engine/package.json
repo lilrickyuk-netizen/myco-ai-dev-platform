@@ -1,5 +1,5 @@
 {
-  "name": "@myco/template-engine",
+  "name": "@myco/template-engine-service",
   "version": "1.0.0",
   "description": "Project template generation engine for MYCO platform",
   "main": "dist/index.js",

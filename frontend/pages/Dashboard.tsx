@@ -10,9 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import ProjectCard from '../components/ProjectCard';
-import CreateProjectDialog from '../components/CreateProjectDialog';
-import TemplateSelector from '../components/TemplateSelector';
+import { ProjectCard } from '../components/ProjectCard';
+import { CreateProjectDialog } from '../components/CreateProjectDialog';
+import { TemplateSelector } from '../components/TemplateSelector';
 
 interface Project {
   id: string;
@@ -60,7 +60,7 @@ const Dashboard: React.FC = () => {
     try {
       setLoading(true);
       const [projectsResult] = await Promise.all([
-        backend.projects.list(),
+        backend.project.list(),
       ]);
       
       setProjects(projectsResult.projects);
@@ -78,7 +78,7 @@ const Dashboard: React.FC = () => {
 
   const handleCreateProject = async (projectData: any) => {
     try {
-      const newProject = await backend.projects.create(projectData);
+      const newProject = await backend.project.create(projectData);
       setProjects(prev => [newProject, ...prev]);
       setShowCreateDialog(false);
       toast({
@@ -97,7 +97,7 @@ const Dashboard: React.FC = () => {
 
   const handleDeleteProject = async (projectId: string) => {
     try {
-      await backend.projects.deleteProject({ id: projectId });
+      await backend.project.remove({ id: projectId });
       setProjects(prev => prev.filter(p => p.id !== projectId));
       toast({
         title: "Success",
@@ -408,7 +408,7 @@ const Dashboard: React.FC = () => {
       <TemplateSelector
         open={showTemplateSelector}
         onOpenChange={setShowTemplateSelector}
-        onSelectTemplate={(template) => {
+        onSelectTemplate={(template: any) => {
           setShowTemplateSelector(false);
           setShowCreateDialog(true);
         }}

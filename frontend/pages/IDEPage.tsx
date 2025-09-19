@@ -13,24 +13,8 @@ import CodeEditor from '../components/CodeEditor';
 import Terminal from '../components/Terminal';
 import AIAssistant from '../components/AIAssistant';
 import { useToast } from '@/components/ui/use-toast';
-
-interface Project {
-  id: string;
-  name: string;
-  description?: string;
-  templateType: string;
-  templateName: string;
-  status: string;
-}
-
-interface FileNode {
-  id: string;
-  name: string;
-  path: string;
-  content?: string;
-  isDirectory: boolean;
-  children?: FileNode[];
-}
+import type { Project } from "~backend/project/types";
+import type { FileNode } from "~backend/filesystem/types";
 
 export default function IDEPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -60,7 +44,9 @@ export default function IDEPage() {
           description: 'A sample project',
           templateType: 'web',
           templateName: 'React TypeScript',
-          status: 'active'
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         });
         
         // Mock file structure
@@ -69,13 +55,13 @@ export default function IDEPage() {
             id: '1',
             name: 'src',
             path: '/src',
-            isDirectory: true,
+            type: 'directory',
             children: [
               {
                 id: '2',
                 name: 'index.ts',
                 path: '/src/index.ts',
-                isDirectory: false,
+                type: 'file',
                 content: '// Welcome to your project\nconsole.log("Hello, World!");'
               }
             ]
@@ -97,7 +83,7 @@ export default function IDEPage() {
   }, [projectId, backend, toast]);
 
   const handleFileSelect = (file: FileNode) => {
-    if (!file.isDirectory) {
+    if (file.type !== 'directory') {
       setCurrentFile(file);
       setFileContent(file.content || '');
       setUnsavedChanges(false);
@@ -189,9 +175,10 @@ export default function IDEPage() {
         <ResizablePanel defaultSize={20} minSize={15} maxSize={40}>
           <div className="h-full border-r border-border">
             <FileExplorer
+              projectId={projectId!}
               files={files}
               onFileSelect={handleFileSelect}
-              selectedFile={currentFile}
+              activeFile={currentFile}
             />
           </div>
         </ResizablePanel>
@@ -208,6 +195,7 @@ export default function IDEPage() {
                   file={currentFile}
                   content={fileContent}
                   onChange={handleContentChange}
+                  onSave={handleSave}
                 />
               </div>
             </ResizablePanel>

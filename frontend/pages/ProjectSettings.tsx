@@ -86,7 +86,7 @@ const ProjectSettings: React.FC = () => {
   const loadProject = async () => {
     try {
       setLoading(true);
-      const projectData = await backend.projects.get({ id: projectId! });
+      const projectData = await backend.project.get({ id: projectId! });
       setProject(projectData);
       setFormData({
         name: projectData.name,
@@ -112,7 +112,7 @@ const ProjectSettings: React.FC = () => {
     
     try {
       setSaving(true);
-      await backend.projects.update({
+      await backend.project.update({
         id: project.id,
         name: formData.name,
         description: formData.description,
@@ -143,7 +143,7 @@ const ProjectSettings: React.FC = () => {
     if (!project) return;
     
     try {
-      await backend.projects.deleteProject({ id: project.id });
+      await backend.project.remove({ id: project.id });
       toast({
         title: "Success",
         description: "Project deleted successfully",

@@ -384,7 +384,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
           {messages.map(renderMessage)}
           
           {/* Loading indicator */}
-          {isLoading && (
+          {loading && (
             <div className="mb-4 mr-8">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center">
@@ -408,22 +408,22 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       <div className="border-t p-3">
         <div className="flex space-x-2">
           <Textarea
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                sendMessage(inputMessage);
+                sendMessage(input);
               }
             }}
             placeholder="Ask me anything about your code..."
             className="flex-1 min-h-[60px] max-h-[120px] resize-none"
-            disabled={isLoading}
+            disabled={loading}
           />
           <Button
             size="sm"
-            onClick={() => sendMessage(inputMessage)}
-            disabled={!inputMessage.trim() || isLoading}
+            onClick={() => sendMessage(input)}
+            disabled={!input.trim() || loading}
             className="self-end"
           >
             <Send className="w-4 h-4" />

@@ -40,28 +40,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-
-interface File {
-  id: string;
-  name: string;
-  path: string;
-  content?: string;
-  isDirectory: boolean;
-  children?: File[];
-}
+import type { FileNode } from "~backend/filesystem/types";
 
 interface FileExplorerProps {
   projectId: string;
-  files: File[];
-  activeFile?: File | null;
-  onFileSelect: (file: File) => void;
+  files: FileNode[];
+  activeFile?: FileNode | null;
+  onFileSelect: (file: FileNode) => void;
   onFileCreate?: (type: 'file' | 'folder', parentPath?: string) => void;
-  onFileDelete?: (file: File) => void;
-  onFileRename?: (file: File, newName: string) => void;
+  onFileDelete?: (file: FileNode) => void;
+  onFileRename?: (file: FileNode, newName: string) => void;
 }
 
-const getFileIcon = (file: File) => {
-  if (file.isDirectory) return Folder;
+const getFileIcon = (file: FileNode) => {
+  if (file.type === 'directory') return Folder;
   
   const extension = file.name.split('.').pop()?.toLowerCase();
   switch (extension) {
@@ -103,11 +95,11 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
   onFileRename
 }) => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileNode | null>(null);
   const [contextMenuFile, setContextMenuFile] = useState<File | null>(null);
   const [isRenaming, setIsRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [deleteConfirm, setDeleteConfirm] = useState<File | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<FileNode | null>(null);
 
   const toggleFolder = (folderPath: string) => {
     const newExpanded = new Set(expandedFolders);
@@ -119,8 +111,8 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     setExpandedFolders(newExpanded);
   };
 
-  const handleFileClick = (file: File) => {
-    if (file.isDirectory) {
+  const handleFileClick = (file: FileNode) => {
+    if (file.type === 'directory') {
       toggleFolder(file.path);
     } else {
       setSelectedFile(file);
@@ -128,12 +120,12 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     }
   };
 
-  const startRename = (file: File) => {
+  const startRename = (file: FileNode) => {
     setIsRenaming(file.path);
     setRenameValue(file.name);
   };
 
-  const handleRename = (file: File) => {
+  const handleRename = (file: FileNode) => {
     if (renameValue && renameValue !== file.name && onFileRename) {
       onFileRename(file, renameValue);
     }
@@ -141,7 +133,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     setRenameValue('');
   };
 
-  const handleDelete = (file: File) => {
+  const handleDelete = (file: FileNode) => {
     setDeleteConfirm(file);
   };
 
@@ -152,8 +144,8 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     setDeleteConfirm(null);
   };
 
-  const buildFileTree = (files: File[], parentPath = '') => {
-    const tree: File[] = [];
+  const buildFileTree = (files: FileNode[], parentPath = '') => {
+    const tree: FileNode[] = [];
     const pathLevel = parentPath.split('/').filter(Boolean).length;
 
     files.forEach(file => {
@@ -169,13 +161,13 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
     });
 
     return tree.sort((a, b) => {
-      if (a.isDirectory && !b.isDirectory) return -1;
-      if (!a.isDirectory && b.isDirectory) return 1;
+      if (a.type === 'directory' && b.type !== 'directory') return -1;
+      if (a.type !== 'directory' && b.type === 'directory') return 1;
       return a.name.localeCompare(b.name);
     });
   };
 
-  const renderFileTree = (files: File[], level = 0, parentPath = '') => {
+  const renderFileTree = (files: FileNode[], level = 0, parentPath = '') => {
     const currentFiles = buildFileTree(files, parentPath);
 
     return currentFiles.map(file => {
@@ -194,7 +186,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
               style={{ paddingLeft: `${level * 16 + 8}px` }}
               onClick={() => handleFileClick(file)}
             >
-              {file.isDirectory && (
+              {file.type === 'directory' && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -212,7 +204,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
                 </Button>
               )}
               
-              {!file.isDirectory && <div className="w-4" />}
+              {file.type !== 'directory' && <div className="w-4" />}
               
               <Icon className="h-4 w-4 flex-shrink-0" />
               
@@ -249,7 +241,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
-                  {file.isDirectory && (
+                  {file.type === 'directory' && (
                     <>
                       <DropdownMenuItem onClick={() => onFileCreate?.('file', file.path)}>
                         <FileIcon className="h-4 w-4 mr-2" />
@@ -278,7 +270,7 @@ const FileExplorer: React.FC<FileExplorerProps> = ({
             </div>
           </ContextMenuTrigger>
           
-          {file.isDirectory && isExpanded && (
+          {file.type === 'directory' && isExpanded && (
             <div>
               {renderFileTree(files, level + 1, file.path)}
             </div>
