@@ -1,0 +1,57 @@
+config:
+  target: "{{ $processEnvironment.STAGING_URL }}"
+  phases:
+    - duration: 60
+      arrivalRate: 5
+      name: "Warm up"
+    - duration: 120
+      arrivalRate: 10
+      name: "Load test"
+    - duration: 60
+      arrivalRate: 20
+      name: "Peak load"
+  processor: "./slo-processor.js"
+  
+scenarios:
+  - name: "Health check"
+    weight: 10
+    flow:
+      - get:
+          url: "/health"
+          expect:
+            - statusCode: 200
+
+  - name: "API endpoints"
+    weight: 70
+    flow:
+      - get:
+          url: "/api/auth/health"
+          expect:
+            - statusCode: 200
+      - get:
+          url: "/api/projects"
+          expect:
+            - statusCode: [200, 401]
+      - post:
+          url: "/api/ai/generate"
+          json:
+            prompt: "Hello world"
+          expect:
+            - statusCode: [200, 401]
+
+  - name: "Frontend assets"
+    weight: 20
+    flow:
+      - get:
+          url: "/"
+          expect:
+            - statusCode: 200
+      - get:
+          url: "/static/js/main.js"
+          expect:
+            - statusCode: [200, 404]
+
+engines:
+  http:
+    timeout: 30
+    pool: 10

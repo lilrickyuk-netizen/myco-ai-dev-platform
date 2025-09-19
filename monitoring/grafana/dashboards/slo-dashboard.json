@@ -1,0 +1,258 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Myco AI Platform - SLO Dashboard",
+    "tags": ["myco-ai", "slo", "reliability"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "SLO Summary",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "http_request_duration_seconds_p95{service=\"myco-ai-platform\"}",
+            "legendFormat": "P95 Latency (s)",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "http_request_error_rate{service=\"myco-ai-platform\"}",
+            "legendFormat": "Error Rate",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {},
+              "renameByName": {
+                "Value #A": "P95 Latency (s)",
+                "Value #B": "Error Rate"
+              }
+            }
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "P95 Latency SLO (≤2s)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "http_request_duration_seconds_p95{service=\"myco-ai-platform\"}",
+            "legendFormat": "P95 Latency"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "max": 3,
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 3,
+              "fillOpacity": 0
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "red", "value": 2}
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "P95 Latency"},
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {"mode": "continuous-GrYlRd"}
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "legend": {
+            "displayMode": "visible",
+            "placement": "bottom"
+          }
+        },
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 3,
+        "title": "Error Rate SLO (≤1%)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "http_request_error_rate{service=\"myco-ai-platform\"} * 100",
+            "legendFormat": "Error Rate (%)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 5,
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 3,
+              "fillOpacity": 0
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "red", "value": 1}
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Error Rate (%)"},
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {"mode": "continuous-GrYlRd"}
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "legend": {
+            "displayMode": "visible",
+            "placement": "bottom"
+          }
+        },
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "SLO Compliance Score",
+        "type": "gauge",
+        "targets": [
+          {
+            "expr": "(http_request_duration_seconds_p95{service=\"myco-ai-platform\"} <= 2) * 50 + (http_request_error_rate{service=\"myco-ai-platform\"} <= 0.01) * 50",
+            "legendFormat": "SLO Score"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 50},
+                {"color": "green", "value": 100}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 9, "w": 8, "x": 0, "y": 17}
+      },
+      {
+        "id": 5,
+        "title": "Latency Distribution",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "increase(http_request_duration_seconds_bucket{service=\"myco-ai-platform\"}[5m])",
+            "legendFormat": "{{le}}",
+            "format": "heatmap"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "vis": false
+              }
+            }
+          }
+        },
+        "gridPos": {"h": 9, "w": 16, "x": 8, "y": 17}
+      },
+      {
+        "id": 6,
+        "title": "Weekly SLO Burn Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "1 - ((sum(increase(http_requests_total{service=\"myco-ai-platform\"}[7d])) - sum(increase(http_request_errors_total{service=\"myco-ai-platform\"}[7d]))) / sum(increase(http_requests_total{service=\"myco-ai-platform\"}[7d])))",
+            "legendFormat": "7-day Error Budget Burn"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 0.5},
+                {"color": "red", "value": 0.9}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26}
+      },
+      {
+        "id": 7,
+        "title": "SLO Violations (Last 24h)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(increase(ALERTS{alertname=~\".*SLO.*\"}[24h]))",
+            "legendFormat": "SLO Violations"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 5}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26}
+      }
+    ],
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "refresh": "1m",
+    "schemaVersion": 30,
+    "version": 1,
+    "editable": true,
+    "graphTooltip": 1
+  }
+}

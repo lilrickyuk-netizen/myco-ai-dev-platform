@@ -1,0 +1,191 @@
+groups:
+  - name: myco-ai-platform.slo
+    interval: 30s
+    rules:
+      # P95 Latency SLO Alerts
+      - alert: HighLatencyP95
+        expr: http_request_duration_seconds_p95{service="myco-ai-platform"} > 2
+        for: 2m
+        labels:
+          severity: critical
+          service: myco-ai-platform
+          slo_type: latency
+        annotations:
+          summary: "High P95 latency detected"
+          description: "P95 latency is {{ $value }}s, which exceeds the 2s SLO threshold"
+          runbook_url: "https://myco-ai.com/runbooks/high-latency"
+
+      - alert: HighLatencyP95Warning
+        expr: http_request_duration_seconds_p95{service="myco-ai-platform"} > 1.5
+        for: 5m
+        labels:
+          severity: warning
+          service: myco-ai-platform
+          slo_type: latency
+        annotations:
+          summary: "Elevated P95 latency detected"
+          description: "P95 latency is {{ $value }}s, approaching the 2s SLO threshold"
+
+      # Error Rate SLO Alerts
+      - alert: HighErrorRate
+        expr: http_request_error_rate{service="myco-ai-platform"} > 0.01
+        for: 1m
+        labels:
+          severity: critical
+          service: myco-ai-platform
+          slo_type: error_rate
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }}, which exceeds the 1% SLO threshold"
+          runbook_url: "https://myco-ai.com/runbooks/high-error-rate"
+
+      - alert: ElevatedErrorRate
+        expr: http_request_error_rate{service="myco-ai-platform"} > 0.005
+        for: 3m
+        labels:
+          severity: warning
+          service: myco-ai-platform
+          slo_type: error_rate
+        annotations:
+          summary: "Elevated error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }}, approaching the 1% SLO threshold"
+
+      # Service Health Alerts
+      - alert: ServiceUnhealthy
+        expr: service_health{service="myco-ai-platform"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: myco-ai-platform
+        annotations:
+          summary: "Service health check failing"
+          description: "Service health check has been failing for more than 30 seconds"
+          runbook_url: "https://myco-ai.com/runbooks/service-unhealthy"
+
+      # Memory Usage Alerts
+      - alert: HighMemoryUsage
+        expr: (nodejs_memory_usage_bytes{service="myco-ai-platform",type="heapUsed"} / nodejs_memory_usage_bytes{service="myco-ai-platform",type="heapTotal"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: myco-ai-platform
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }} of heap total"
+
+      - alert: CriticalMemoryUsage
+        expr: (nodejs_memory_usage_bytes{service="myco-ai-platform",type="heapUsed"} / nodejs_memory_usage_bytes{service="myco-ai-platform",type="heapTotal"}) > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          service: myco-ai-platform
+        annotations:
+          summary: "Critical memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }} of heap total - potential OOM risk"
+          runbook_url: "https://myco-ai.com/runbooks/high-memory"
+
+  - name: myco-ai-platform.availability
+    interval: 30s
+    rules:
+      # Request Rate Alerts
+      - alert: NoRequestsReceived
+        expr: rate(http_requests_total{service="myco-ai-platform"}[5m]) == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: myco-ai-platform
+        annotations:
+          summary: "No requests received"
+          description: "No HTTP requests have been received in the last 5 minutes"
+
+      - alert: HighRequestRate
+        expr: rate(http_requests_total{service="myco-ai-platform"}[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: myco-ai-platform
+        annotations:
+          summary: "Very high request rate"
+          description: "Request rate is {{ $value }} requests/second, which may indicate unusual load"
+
+      # Uptime Alerts
+      - alert: ServiceRestarted
+        expr: increase(process_uptime_seconds{service="myco-ai-platform"}[5m]) < 0
+        for: 0s
+        labels:
+          severity: info
+          service: myco-ai-platform
+        annotations:
+          summary: "Service has been restarted"
+          description: "The service has been restarted recently"
+
+  - name: myco-ai-platform.performance
+    interval: 1m
+    rules:
+      # Response Time Recording Rules (for efficient querying)
+      - record: myco_ai:http_request_duration_seconds:p50
+        expr: histogram_quantile(0.5, rate(http_request_duration_seconds_bucket{service="myco-ai-platform"}[5m]))
+
+      - record: myco_ai:http_request_duration_seconds:p90
+        expr: histogram_quantile(0.9, rate(http_request_duration_seconds_bucket{service="myco-ai-platform"}[5m]))
+
+      - record: myco_ai:http_request_duration_seconds:p95
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{service="myco-ai-platform"}[5m]))
+
+      - record: myco_ai:http_request_duration_seconds:p99
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{service="myco-ai-platform"}[5m]))
+
+      # Error Rate Recording Rules
+      - record: myco_ai:http_request_error_rate:5m
+        expr: sum(rate(http_request_errors_total{service="myco-ai-platform"}[5m])) / sum(rate(http_requests_total{service="myco-ai-platform"}[5m]))
+
+      - record: myco_ai:http_request_error_rate:1h
+        expr: sum(rate(http_request_errors_total{service="myco-ai-platform"}[1h])) / sum(rate(http_requests_total{service="myco-ai-platform"}[1h]))
+
+      # SLO Burn Rate Rules
+      - record: myco_ai:slo_error_budget_burn_rate:1h
+        expr: (1 - myco_ai:http_request_error_rate:1h) / 0.99  # 99% availability SLO
+
+      - record: myco_ai:slo_latency_budget_burn_rate:1h
+        expr: 1 - (sum(rate(http_request_duration_seconds_bucket{service="myco-ai-platform",le="2"}[1h])) / sum(rate(http_request_duration_seconds_count{service="myco-ai-platform"}[1h])))
+
+  - name: myco-ai-platform.slo-burn-rate
+    interval: 1m
+    rules:
+      # Fast burn rate alerts (1% budget in 1 hour)
+      - alert: SLOErrorBudgetBurnRateFast
+        expr: myco_ai:slo_error_budget_burn_rate:1h > 14.4  # 1% of monthly budget in 1 hour
+        for: 2m
+        labels:
+          severity: critical
+          service: myco-ai-platform
+          slo_type: error_budget
+        annotations:
+          summary: "Fast SLO error budget burn rate"
+          description: "Error budget is burning at {{ $value }}x the normal rate"
+          runbook_url: "https://myco-ai.com/runbooks/slo-burn-rate"
+
+      # Slow burn rate alerts (5% budget in 6 hours)
+      - alert: SLOErrorBudgetBurnRateSlow
+        expr: myco_ai:slo_error_budget_burn_rate:1h > 6  # 5% of monthly budget in 6 hours
+        for: 15m
+        labels:
+          severity: warning
+          service: myco-ai-platform
+          slo_type: error_budget
+        annotations:
+          summary: "Elevated SLO error budget burn rate"
+          description: "Error budget is burning at {{ $value }}x the normal rate"
+
+      # Latency SLO burn rate
+      - alert: SLOLatencyBudgetBurnRateFast
+        expr: myco_ai:slo_latency_budget_burn_rate:1h > 14.4
+        for: 2m
+        labels:
+          severity: critical
+          service: myco-ai-platform
+          slo_type: latency_budget
+        annotations:
+          summary: "Fast SLO latency budget burn rate"
+          description: "Latency budget is burning at {{ $value }}x the normal rate"
+          runbook_url: "https://myco-ai.com/runbooks/slo-burn-rate"
