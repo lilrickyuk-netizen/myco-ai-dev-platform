@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/toaster';
 import Dashboard from './components/Dashboard';
 import IDEPage from './pages/IDEPage';
 import ProjectSettings from './pages/ProjectSettings';
+import AgentMonitorPage from './pages/AgentMonitor';
 import Terms from './src/pages/terms';
 import Privacy from './src/pages/privacy';
 import Support from './src/pages/support';
@@ -160,6 +161,14 @@ function AppInner() {
               element={
                 <ProtectedRoute>
                   <ProjectSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/agent-monitor"
+              element={
+                <ProtectedRoute>
+                  <AgentMonitorPage />
                 </ProtectedRoute>
               }
             />

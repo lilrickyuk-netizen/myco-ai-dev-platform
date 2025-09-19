@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Plus, FolderOpen, Clock, FileText, Loader2, AlertCircle } from "lucide-react";
+import { Plus, FolderOpen, Clock, FileText, Loader2, AlertCircle, Activity } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useBackend } from "../hooks/useBackend";
@@ -76,13 +77,21 @@ export default function Dashboard() {
             Manage your projects and start coding
           </p>
         </div>
-        <Button 
-          onClick={() => setCreateDialogOpen(true)}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          New Project
-        </Button>
+        <div className="flex gap-2">
+          <Link to="/agent-monitor">
+            <Button variant="outline" className="gap-2">
+              <Activity className="h-4 w-4" />
+              Agent Monitor
+            </Button>
+          </Link>
+          <Button 
+            onClick={() => setCreateDialogOpen(true)}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            New Project
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
