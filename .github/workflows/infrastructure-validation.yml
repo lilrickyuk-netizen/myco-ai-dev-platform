@@ -1,0 +1,159 @@
+name: Infrastructure Validation
+
+on:
+  push:
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-validation.yml'
+  pull_request:
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-validation.yml'
+
+jobs:
+  terraform-validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./infrastructure/terraform
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: '1.6.0'
+    
+    - name: Terraform Format Check
+      run: terraform fmt -check -recursive
+    
+    - name: Terraform Init
+      run: terraform init -backend=false
+    
+    - name: Terraform Validate
+      run: terraform validate
+    
+    - name: Run TFLint
+      uses: terraform-linters/setup-tflint@v4
+      with:
+        tflint_version: latest
+    
+    - name: TFLint
+      run: |
+        tflint --init
+        tflint
+
+  kubernetes-validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Validate Kubernetes Manifests
+      working-directory: ./infrastructure/kubernetes
+      run: |
+        for file in *.yaml; do
+          echo "Validating $file"
+          kubectl apply --dry-run=client --validate=true -f "$file"
+        done
+    
+    - name: Setup kubeval
+      run: |
+        wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+        tar xf kubeval-linux-amd64.tar.gz
+        sudo mv kubeval /usr/local/bin
+    
+    - name: Run kubeval
+      working-directory: ./infrastructure/kubernetes
+      run: |
+        for file in *.yaml; do
+          echo "Running kubeval on $file"
+          kubeval "$file"
+        done
+
+  docker-validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Hadolint
+      run: |
+        wget -O hadolint https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
+        chmod +x hadolint
+        sudo mv hadolint /usr/local/bin/
+    
+    - name: Lint Dockerfiles
+      run: |
+        find . -name "Dockerfile*" -type f | xargs hadolint
+
+  docker-compose-validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Validate docker-compose files
+      run: |
+        docker-compose -f docker-compose.yml config
+        docker-compose -f docker-compose.prod.yml config
+        docker-compose -f docker-compose.test.yml config
+
+  infrastructure-security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'config'
+        scan-ref: './infrastructure'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  cost-estimation:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Infracost
+      uses: infracost/actions/setup@v2
+      with:
+        api-key: ${{ secrets.INFRACOST_API_KEY }}
+    
+    - name: Generate Infracost cost estimate baseline
+      run: |
+        infracost breakdown --path=infrastructure/terraform \
+                            --format=json \
+                            --out-file=/tmp/infracost-base.json
+    
+    - name: Generate Infracost diff
+      run: |
+        infracost diff --path=infrastructure/terraform \
+                       --format=json \
+                       --compare-to=/tmp/infracost-base.json \
+                       --out-file=/tmp/infracost.json
+    
+    - name: Post Infracost comment
+      run: |
+        infracost comment github --path=/tmp/infracost.json \
+                                 --repo=$GITHUB_REPOSITORY \
+                                 --github-token=${{github.token}} \
+                                 --pull-request=${{github.event.pull_request.number}} \
+                                 --behavior=update
