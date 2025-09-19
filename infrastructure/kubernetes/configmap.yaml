@@ -5,32 +5,25 @@ metadata:
   namespace: myco-platform
 data:
   # Database Configuration
-  POSTGRES_DB: "myco_platform"
+  POSTGRES_DB: "postgres"
   POSTGRES_USER: "postgres"
-  MONGODB_DATABASE: "myco_platform"
   REDIS_DB: "0"
   
   # Service URLs
-  DATABASE_URL: "postgresql://postgres:password@postgres:5432/myco_platform"
-  REDIS_URL: "redis://redis:6379/0"
-  MONGODB_URL: "mongodb://mongodb:27017/myco_platform"
-  WEAVIATE_URL: "http://weaviate:8080"
-  OLLAMA_BASE_URL: "http://ollama:11434"
+  DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/postgres"
+  REDIS_URL: "redis://redis:6379"
+  AI_ENGINE_URL: "http://ai-engine:8001"
   
   # Application Configuration
   NODE_ENV: "production"
-  AI_ENGINE_HOST: "0.0.0.0"
-  AI_ENGINE_PORT: "8000"
-  EXECUTION_ENGINE_PORT: "8001"
-  
-  # Monitoring
-  PROMETHEUS_URL: "http://prometheus:9090"
-  GRAFANA_URL: "http://grafana:3000"
+  AI_ENGINE_PORT: "8001"
+  EXECUTION_ENGINE_PORT: "8002"
+  TEMPLATE_ENGINE_PORT: "8003"
+  VALIDATION_ENGINE_PORT: "8004"
+  PORT: "3001"
   
   # Security
-  ENABLE_AUTH: "true"
-  ENABLE_METRICS: "true"
-  LOG_LEVEL: "INFO"
+  LOG_LEVEL: "info"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -45,15 +38,15 @@ data:
     
     http {
         upstream backend {
-            server backend:3000;
+            server backend:3001;
         }
         
         upstream ai-engine {
-            server ai-engine:8000;
+            server ai-engine:8001;
         }
         
         upstream frontend {
-            server frontend:5173;
+            server frontend:3000;
         }
         
         server {

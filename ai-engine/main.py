@@ -14,16 +14,30 @@ from typing import Dict, List, Any, Optional
 import json
 import time
 
-from .core.config import settings
-from .core.logging import setup_logging
-from .api.routes import generation, models, agents, health
-from .services.agent_manager import agent_manager
-from .services.vector_store import vector_store_manager
-from .services.cache_manager import cache_manager
-from .services.llm_manager import llm_manager
-from .middleware.auth import AuthMiddleware
-from .middleware.rate_limit import RateLimitMiddleware
-from .middleware.monitoring import MonitoringMiddleware
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Simplified imports for standalone mode
+try:
+    from .core.config import settings
+except ImportError:
+    # Create basic settings if config module doesn't exist
+    class Settings:
+        HOST = "0.0.0.0"
+        PORT = 8001
+        DEBUG = True
+        WORKERS = 1
+        LOG_LEVEL = "INFO"
+        ALLOWED_ORIGINS = ["*"]
+    settings = Settings()
+
+try:
+    from .services.llm_manager import llm_manager
+except ImportError:
+    # Create basic llm_manager if module doesn't exist
+    from services.llm_manager import llm_manager
 
 # Setup logging
 setup_logging()
@@ -36,21 +50,17 @@ async def lifespan(app: FastAPI):
     """Application lifespan events"""
     logger.info("Starting AI Engine...")
     
-    # Initialize services
-    await llm_manager.initialize()
-    await agent_manager.initialize()
-    await vector_store_manager.initialize()
-    await cache_manager.initialize()
+    # Initialize services - only llm_manager for now
+    if hasattr(llm_manager, 'initialize'):
+        await llm_manager.initialize()
     
     logger.info("AI Engine started successfully")
     yield
     
     # Cleanup
     logger.info("Shutting down AI Engine...")
-    await llm_manager.cleanup()
-    await agent_manager.cleanup()
-    await vector_store_manager.cleanup()
-    await cache_manager.cleanup()
+    if hasattr(llm_manager, 'cleanup'):
+        await llm_manager.cleanup()
     logger.info("AI Engine shutdown complete")
 
 # Create FastAPI app
@@ -73,15 +83,6 @@ app.add_middleware(
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
-app.add_middleware(MonitoringMiddleware)
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(AuthMiddleware)
-
-# Include routers
-app.include_router(health.router, prefix="/health", tags=["health"])
-app.include_router(models.router, prefix="/models", tags=["models"])
-app.include_router(generation.router, prefix="/generation", tags=["generation"])
-app.include_router(agents.router, prefix="/agents", tags=["agents"])
 
 @app.get("/")
 async def root():
@@ -93,12 +94,124 @@ async def root():
         "timestamp": time.time(),
         "capabilities": [
             "multi-model LLM support",
-            "agent orchestration",
-            "vector embeddings",
             "code generation",
-            "project scaffolding",
-            "quality verification"
+            "AI assistance"
         ]
+    }
+
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "ai-engine",
+        "version": "1.0.0",
+        "uptime": time.time(),
+        "timestamp": time.time()
+    }
+
+@app.get("/ready")
+async def ready():
+    """Readiness check endpoint"""
+    try:
+        # Check if LLM manager is available
+        providers = llm_manager.get_available_providers()
+        
+        # Check environment variables for any configured providers
+        has_openai = bool(os.getenv("OPENAI_API_KEY"))
+        has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
+        has_google = bool(os.getenv("GOOGLE_API_KEY"))
+        
+        status = "ready"
+        if not (has_openai or has_anthropic or has_google):
+            status = "degraded"  # Running with stub provider only
+        
+        return {
+            "status": status,
+            "providers_available": providers,
+            "configured_providers": {
+                "openai": has_openai,
+                "anthropic": has_anthropic,
+                "google": has_google
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "degraded",
+            "error": str(e)
+        }
+
+@app.get("/models")
+async def get_models():
+    """Get available models"""
+    try:
+        providers = llm_manager.get_available_providers()
+        models = {}
+        
+        for provider_str in providers:
+            # Convert string back to enum for method call
+            from services.llm_manager import LLMProvider
+            try:
+                provider_enum = LLMProvider(provider_str)
+                models[provider_str] = llm_manager.get_provider_models(provider_enum)
+            except ValueError:
+                models[provider_str] = ["stub-model"]
+        
+        return {"models": models}
+    except Exception as e:
+        return {"error": str(e), "models": {}}
+
+@app.post("/generation")
+async def generate_text(request: dict):
+    """Generate text using LLM"""
+    try:
+        prompt = request.get("messages", [{}])[-1].get("content", "") or request.get("prompt", "")
+        model = request.get("model", "gpt-3.5-turbo")
+        
+        if not prompt:
+            return {"error": "No prompt provided"}
+        
+        # Use the appropriate provider based on model
+        provider = None
+        if "gpt" in model:
+            from services.llm_manager import LLMProvider
+            provider = LLMProvider.OPENAI
+        elif "claude" in model:
+            from services.llm_manager import LLMProvider
+            provider = LLMProvider.ANTHROPIC
+        elif "gemini" in model:
+            from services.llm_manager import LLMProvider
+            provider = LLMProvider.GOOGLE
+        
+        response = await llm_manager.generate(
+            prompt=prompt,
+            provider=provider,
+            model=model
+        )
+        
+        return {
+            "choices": [{
+                "message": {
+                    "content": response.content,
+                    "role": "assistant"
+                },
+                "finish_reason": response.finish_reason
+            }],
+            "usage": response.usage,
+            "model": response.model,
+            "object": "chat.completion"
+        }
+    except Exception as e:
+        logger.error(f"Generation error: {e}")
+        return {"error": str(e)}
+
+@app.post("/agents/plan")
+async def plan_agent_task(request: dict):
+    """Basic agent planning endpoint"""
+    return {
+        "status": "ok",
+        "plan": "Agent planning is under development",
+        "tasks": []
     }
 
 @app.websocket("/ws/generation")

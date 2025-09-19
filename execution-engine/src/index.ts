@@ -1,265 +1,248 @@
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
-import { ExecutionService, JobConfig } from './execution_service';
-import { body, param, validationResult } from 'express-validator';
+import fastify from 'fastify';
+import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import { createClient } from 'redis';
+import { v4 as uuidv4 } from 'uuid';
+import dotenv from 'dotenv';
 
-const app = express();
-const port = process.env.EXECUTION_ENGINE_PORT || 8001;
+dotenv.config();
 
-// Initialize execution service
-const executionService = new ExecutionService();
+const app = fastify({ logger: true });
 
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173']
-}));
-app.use(express.json({ limit: '10mb' }));
+// Redis client for job queue
+let redis: any = null;
+const jobs = new Map(); // In-memory fallback if Redis not available
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later'
-});
-app.use(limiter);
+interface Job {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  logs?: string[];
+  result?: any;
+  error?: string;
+  created_at: Date;
+}
 
-// Stricter rate limiting for execution endpoint
-const executionLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // limit each IP to 10 executions per minute
-  message: 'Too many code executions, please try again later'
-});
-
-// Validation middleware
-const handleValidationErrors = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-  next();
-};
-
-// Health check endpoint
-app.get('/health', async (req, res) => {
+// Initialize Redis if available
+async function initRedis() {
   try {
-    const health = await executionService.healthCheck();
-    res.json(health);
-  } catch (error) {
-    res.status(500).json({ error: 'Health check failed' });
-  }
-});
-
-// Get supported languages
-app.get('/languages', (req, res) => {
-  const languages = executionService.getSupportedLanguages();
-  const configs = Object.fromEntries(
-    languages.map(lang => [lang, executionService.getLanguageConfig(lang)])
-  );
-  
-  res.json({
-    languages,
-    configs
-  });
-});
-
-// Execute code
-app.post('/execute',
-  executionLimiter,
-  [
-    body('language').isString().notEmpty().withMessage('Language is required'),
-    body('code').isString().notEmpty().withMessage('Code is required'),
-    body('input').optional().isString(),
-    body('timeout').optional().isInt({ min: 1000, max: 60000 }),
-    body('memoryLimit').optional().isString(),
-    body('cpuLimit').optional().isFloat({ min: 0.1, max: 2.0 }),
-    body('environment').optional().isObject(),
-    body('dependencies').optional().isArray(),
-    body('tests').optional().isArray()
-  ],
-  handleValidationErrors,
-  async (req, res) => {
-    try {
-      const config: JobConfig = {
-        language: req.body.language,
-        code: req.body.code,
-        input: req.body.input,
-        timeout: req.body.timeout,
-        memoryLimit: req.body.memoryLimit,
-        cpuLimit: req.body.cpuLimit,
-        environment: req.body.environment,
-        dependencies: req.body.dependencies,
-        tests: req.body.tests
-      };
-
-      // Validate language
-      if (!executionService.getSupportedLanguages().includes(config.language)) {
-        return res.status(400).json({ error: `Unsupported language: ${config.language}` });
-      }
-
-      const jobId = await executionService.executeCode(config);
-      res.json({ jobId, message: 'Code execution started' });
-    } catch (error) {
-      console.error('Execution error:', error);
-      res.status(500).json({ error: 'Failed to start code execution' });
+    if (process.env.REDIS_URL) {
+      redis = createClient({ url: process.env.REDIS_URL });
+      await redis.connect();
+      console.log('Connected to Redis for job queue');
+    } else {
+      console.log('No Redis URL configured, using in-memory job storage');
     }
-  }
-);
-
-// Get job status
-app.get('/jobs/:jobId',
-  [
-    param('jobId').isUUID().withMessage('Invalid job ID')
-  ],
-  handleValidationErrors,
-  async (req, res) => {
-    try {
-      const job = await executionService.getJobStatus(req.params.jobId);
-      if (!job) {
-        return res.status(404).json({ error: 'Job not found' });
-      }
-      res.json(job);
-    } catch (error) {
-      console.error('Get job status error:', error);
-      res.status(500).json({ error: 'Failed to get job status' });
-    }
-  }
-);
-
-// Cancel job
-app.delete('/jobs/:jobId',
-  [
-    param('jobId').isUUID().withMessage('Invalid job ID')
-  ],
-  handleValidationErrors,
-  async (req, res) => {
-    try {
-      await executionService.cancelJob(req.params.jobId);
-      res.json({ message: 'Job cancelled' });
-    } catch (error) {
-      console.error('Cancel job error:', error);
-      if (error instanceof Error && error.message.includes('not found')) {
-        return res.status(404).json({ error: error.message });
-      }
-      res.status(500).json({ error: 'Failed to cancel job' });
-    }
-  }
-);
-
-// List all jobs
-app.get('/jobs', async (req, res) => {
-  try {
-    const jobs = await executionService.listJobs();
-    res.json({ jobs });
   } catch (error) {
-    console.error('List jobs error:', error);
-    res.status(500).json({ error: 'Failed to list jobs' });
-  }
-});
-
-// Get queue status
-app.get('/queue', async (req, res) => {
-  try {
-    const status = await executionService.getQueueStatus();
-    res.json(status);
-  } catch (error) {
-    console.error('Queue status error:', error);
-    res.status(500).json({ error: 'Failed to get queue status' });
-  }
-});
-
-// WebSocket support for real-time job updates
-import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
-
-const server = createServer(app);
-const io = new SocketIOServer(server, {
-  cors: {
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'],
-    methods: ['GET', 'POST']
-  }
-});
-
-// WebSocket connection handling
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-
-  socket.on('subscribe-job', (jobId: string) => {
-    socket.join(`job-${jobId}`);
-  });
-
-  socket.on('unsubscribe-job', (jobId: string) => {
-    socket.leave(`job-${jobId}`);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-  });
-});
-
-// Set up execution service event listeners
-executionService.on('jobCreated', (job) => {
-  io.to(`job-${job.id}`).emit('job-created', job);
-});
-
-executionService.on('jobStarted', (job) => {
-  io.to(`job-${job.id}`).emit('job-started', job);
-});
-
-executionService.on('jobCompleted', (job) => {
-  io.to(`job-${job.id}`).emit('job-completed', job);
-});
-
-executionService.on('jobFailed', (job) => {
-  io.to(`job-${job.id}`).emit('job-failed', job);
-});
-
-executionService.on('jobCancelled', (job) => {
-  io.to(`job-${job.id}`).emit('job-cancelled', job);
-});
-
-// Error handling middleware
-app.use((error: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
-});
-
-// Initialize and start server
-async function start() {
-  try {
-    console.log('Initializing execution service...');
-    await executionService.initialize();
-    
-    server.listen(port, () => {
-      console.log(`Execution Engine running on port ${port}`);
-      console.log(`Supported languages: ${executionService.getSupportedLanguages().join(', ')}`);
-    });
-  } catch (error) {
-    console.error('Failed to start execution engine:', error);
-    process.exit(1);
+    console.log('Redis connection failed, using in-memory job storage:', error);
+    redis = null;
   }
 }
 
+// Middleware
+app.register(cors, {
+  origin: true,
+  credentials: true
+});
+
+app.register(helmet);
+
+// Health endpoint
+app.get('/health', async (request, reply) => {
+  return {
+    status: 'healthy',
+    service: 'execution-engine',
+    version: '1.0.0',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  };
+});
+
+// Ready endpoint
+app.get('/ready', async (request, reply) => {
+  try {
+    // Check Redis if configured
+    if (redis) {
+      await redis.ping();
+    }
+    
+    return { status: 'ready' };
+  } catch (error) {
+    reply.code(503);
+    return { 
+      status: 'degraded', 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    };
+  }
+});
+
+// Enqueue job endpoint
+app.post('/jobs', async (request, reply) => {
+  const body = request.body as any;
+  const jobId = uuidv4();
+  
+  const job: Job = {
+    id: jobId,
+    status: 'pending',
+    logs: [],
+    created_at: new Date()
+  };
+  
+  try {
+    if (redis) {
+      await redis.hSet(`job:${jobId}`, job);
+      await redis.lPush('job_queue', jobId);
+    } else {
+      jobs.set(jobId, job);
+    }
+    
+    // Simulate job processing
+    processJob(jobId, body);
+    
+    return { id: jobId };
+  } catch (error) {
+    reply.code(500);
+    return { error: 'Failed to enqueue job' };
+  }
+});
+
+// Get job status endpoint
+app.get('/jobs/:id', async (request, reply) => {
+  const { id } = request.params as { id: string };
+  
+  try {
+    let job: Job | null = null;
+    
+    if (redis) {
+      const jobData = await redis.hGetAll(`job:${id}`);
+      if (Object.keys(jobData).length > 0) {
+        job = {
+          ...jobData,
+          logs: jobData.logs ? JSON.parse(jobData.logs) : [],
+          created_at: new Date(jobData.created_at)
+        };
+      }
+    } else {
+      job = jobs.get(id) || null;
+    }
+    
+    if (!job) {
+      reply.code(404);
+      return { error: 'Job not found' };
+    }
+    
+    return job;
+  } catch (error) {
+    reply.code(500);
+    return { error: 'Failed to fetch job' };
+  }
+});
+
+// List jobs endpoint
+app.get('/jobs', async (request, reply) => {
+  try {
+    const jobList: Job[] = [];
+    
+    if (redis) {
+      const keys = await redis.keys('job:*');
+      for (const key of keys) {
+        const jobData = await redis.hGetAll(key);
+        if (Object.keys(jobData).length > 0) {
+          jobList.push({
+            ...jobData,
+            logs: jobData.logs ? JSON.parse(jobData.logs) : [],
+            created_at: new Date(jobData.created_at)
+          });
+        }
+      }
+    } else {
+      jobList.push(...Array.from(jobs.values()));
+    }
+    
+    return { jobs: jobList };
+  } catch (error) {
+    reply.code(500);
+    return { error: 'Failed to list jobs' };
+  }
+});
+
+// Simulate job processing
+async function processJob(jobId: string, payload: any) {
+  const updateJob = async (updates: Partial<Job>) => {
+    if (redis) {
+      const current = await redis.hGetAll(`job:${jobId}`);
+      const updated = { ...current, ...updates };
+      if (updates.logs) {
+        updated.logs = JSON.stringify(updates.logs);
+      }
+      await redis.hSet(`job:${jobId}`, updated);
+    } else {
+      const current = jobs.get(jobId);
+      if (current) {
+        jobs.set(jobId, { ...current, ...updates });
+      }
+    }
+  };
+  
+  try {
+    // Start job
+    await updateJob({ status: 'running' });
+    
+    // Simulate processing time
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Simulate success
+    await updateJob({ 
+      status: 'completed',
+      logs: ['Job started', 'Processing...', 'Job completed successfully'],
+      result: { 
+        output: 'Hello, World!',
+        execution_time: '1.2s',
+        memory_used: '12MB'
+      }
+    });
+  } catch (error) {
+    await updateJob({ 
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      logs: ['Job started', 'Error occurred during processing']
+    });
+  }
+}
+
+// Initialize and start server
+const start = async () => {
+  try {
+    await initRedis();
+    
+    const port = parseInt(process.env.EXECUTION_ENGINE_PORT || '8002');
+    await app.listen({ port, host: '0.0.0.0' });
+    
+    console.log(`Execution Engine running on port ${port}`);
+    console.log(`Health check: http://localhost:${port}/health`);
+    console.log(`Ready check: http://localhost:${port}/ready`);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
+};
+
 // Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Shutting down execution engine...');
-  await executionService.cleanup();
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  if (redis) {
+    await redis.quit();
+  }
+  await app.close();
   process.exit(0);
 });
 
-process.on('SIGTERM', async () => {
-  console.log('Shutting down execution engine...');
-  await executionService.cleanup();
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully');
+  if (redis) {
+    await redis.quit();
+  }
+  await app.close();
   process.exit(0);
 });
 
 start();
-
-export { app, executionService };

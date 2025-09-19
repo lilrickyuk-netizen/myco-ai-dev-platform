@@ -29,34 +29,6 @@ spec:
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: mongodb-pv
-  namespace: myco-platform
-spec:
-  capacity:
-    storage: 10Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage
-  hostPath:
-    path: /data/mongodb
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mongodb-pvc
-  namespace: myco-platform
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-  storageClassName: local-storage
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
   name: redis-pv
   namespace: myco-platform
 spec:
@@ -80,34 +52,6 @@ spec:
   resources:
     requests:
       storage: 5Gi
-  storageClassName: local-storage
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: weaviate-pv
-  namespace: myco-platform
-spec:
-  capacity:
-    storage: 20Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-storage
-  hostPath:
-    path: /data/weaviate
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: weaviate-pvc
-  namespace: myco-platform
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 20Gi
   storageClassName: local-storage
 ---
 apiVersion: storage.k8s.io/v1

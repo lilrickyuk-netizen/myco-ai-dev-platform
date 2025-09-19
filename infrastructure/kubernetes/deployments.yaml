@@ -68,62 +68,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mongodb
-  namespace: myco-platform
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mongodb
-  template:
-    metadata:
-      labels:
-        app: mongodb
-    spec:
-      containers:
-      - name: mongodb
-        image: mongo:7
-        ports:
-        - containerPort: 27017
-        env:
-        - name: MONGO_INITDB_DATABASE
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: MONGODB_DATABASE
-        - name: MONGO_INITDB_ROOT_USERNAME
-          value: "admin"
-        - name: MONGO_INITDB_ROOT_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: myco-secrets
-              key: mongodb-password
-        volumeMounts:
-        - name: mongodb-storage
-          mountPath: /data/db
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          exec:
-            command:
-            - mongosh
-            - --eval
-            - "db.adminCommand('ping')"
-          initialDelaySeconds: 30
-          periodSeconds: 10
-      volumes:
-      - name: mongodb-storage
-        persistentVolumeClaim:
-          claimName: mongodb-pvc
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: redis
   namespace: myco-platform
 spec:
@@ -141,10 +85,7 @@ spec:
         image: redis:7-alpine
         ports:
         - containerPort: 6379
-        command:
-        - redis-server
-        - --appendonly
-        - "yes"
+        command: ["redis-server", "--appendonly", "yes"]
         volumeMounts:
         - name: redis-storage
           mountPath: /data
@@ -162,6 +103,13 @@ spec:
             - ping
           initialDelaySeconds: 30
           periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
       volumes:
       - name: redis-storage
         persistentVolumeClaim:
@@ -170,37 +118,49 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: weaviate
+  name: ai-engine
   namespace: myco-platform
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: weaviate
+      app: ai-engine
   template:
     metadata:
       labels:
-        app: weaviate
+        app: ai-engine
     spec:
       containers:
-      - name: weaviate
-        image: semitechnologies/weaviate:1.22.4
+      - name: ai-engine
+        image: myco/ai-engine:latest
         ports:
-        - containerPort: 8080
+        - containerPort: 8001
         env:
-        - name: QUERY_DEFAULTS_LIMIT
-          value: "25"
-        - name: AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED
-          value: "true"
-        - name: PERSISTENCE_DATA_PATH
-          value: "/var/lib/weaviate"
-        - name: DEFAULT_VECTORIZER_MODULE
-          value: "none"
-        - name: ENABLE_MODULES
-          value: "text2vec-openai,text2vec-cohere,text2vec-huggingface"
-        volumeMounts:
-        - name: weaviate-storage
-          mountPath: /var/lib/weaviate
+        - name: AI_PROVIDER
+          value: "stub"
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: myco-config
+              key: AI_ENGINE_PORT
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: myco-secrets
+              key: openai-api-key
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: myco-secrets
+              key: anthropic-api-key
+              optional: true
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: myco-secrets
+              key: google-api-key
+              optional: true
         resources:
           requests:
             memory: "512Mi"
@@ -208,10 +168,18 @@ spec:
           limits:
             memory: "1Gi"
             cpu: "500m"
-      volumes:
-      - name: weaviate-storage
-        persistentVolumeClaim:
-          claimName: weaviate-pvc
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 10
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -232,133 +200,52 @@ spec:
       - name: backend
         image: myco/backend:latest
         ports:
-        - containerPort: 3000
+        - containerPort: 3001
         env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: myco-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: myco-config
+              key: REDIS_URL
+        - name: AI_ENGINE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: myco-config
+              key: AI_ENGINE_URL
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: myco-config
+              key: PORT
         - name: NODE_ENV
           valueFrom:
             configMapKeyRef:
               name: myco-config
               key: NODE_ENV
-        - name: DATABASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: DATABASE_URL
-        - name: REDIS_URL
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: REDIS_URL
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: myco-secrets
-              key: jwt-secret
-        - name: CLERK_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: myco-secrets
-              key: clerk-secret-key
         resources:
           requests:
             memory: "256Mi"
-            cpu: "250m"
+            cpu: "200m"
           limits:
             memory: "512Mi"
-            cpu: "500m"
+            cpu: "400m"
         livenessProbe:
           httpGet:
             path: /health
-            port: 3000
+            port: 3001
           initialDelaySeconds: 30
-          periodSeconds: 10
+          periodSeconds: 15
         readinessProbe:
           httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ai-engine
-  namespace: myco-platform
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: ai-engine
-  template:
-    metadata:
-      labels:
-        app: ai-engine
-    spec:
-      containers:
-      - name: ai-engine
-        image: myco/ai-engine:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: AI_ENGINE_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: AI_ENGINE_HOST
-        - name: AI_ENGINE_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: AI_ENGINE_PORT
-        - name: DATABASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: DATABASE_URL
-        - name: REDIS_URL
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: REDIS_URL
-        - name: WEAVIATE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: myco-config
-              key: WEAVIATE_URL
-        - name: OPENAI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: myco-secrets
-              key: openai-api-key
-        - name: ANTHROPIC_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: myco-secrets
-              key: anthropic-api-key
-        - name: GOOGLE_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: myco-secrets
-              key: google-api-key
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "500m"
-          limits:
-            memory: "1Gi"
-            cpu: "1000m"
-        livenessProbe:
-          httpGet:
-            path: /health/ping
-            port: 8000
-          initialDelaySeconds: 30
+            path: /ready
+            port: 3001
+          initialDelaySeconds: 10
           periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health/ping
-            port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 5
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -379,17 +266,10 @@ spec:
       - name: frontend
         image: myco/frontend:latest
         ports:
-        - containerPort: 5173
+        - containerPort: 3000
         env:
-        - name: VITE_API_URL
-          value: "http://backend:3000"
-        - name: VITE_AI_ENGINE_URL
-          value: "http://ai-engine:8000"
-        - name: VITE_CLERK_PUBLISHABLE_KEY
-          valueFrom:
-            secretKeyRef:
-              name: myco-secrets
-              key: clerk-publishable-key
+        - name: VITE_API_BASE_URL
+          value: "http://backend:3001"
         resources:
           requests:
             memory: "128Mi"
@@ -400,55 +280,12 @@ spec:
         livenessProbe:
           httpGet:
             path: /
-            port: 5173
+            port: 3000
           initialDelaySeconds: 30
-          periodSeconds: 10
+          periodSeconds: 15
         readinessProbe:
           httpGet:
             path: /
-            port: 5173
-          initialDelaySeconds: 5
-          periodSeconds: 5
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: nginx
-  namespace: myco-platform
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: nginx
-  template:
-    metadata:
-      labels:
-        app: nginx
-    spec:
-      containers:
-      - name: nginx
-        image: nginx:alpine
-        ports:
-        - containerPort: 80
-        - containerPort: 443
-        volumeMounts:
-        - name: nginx-config
-          mountPath: /etc/nginx/nginx.conf
-          subPath: nginx.conf
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "50m"
-          limits:
-            memory: "128Mi"
-            cpu: "100m"
-        livenessProbe:
-          httpGet:
-            path: /
-            port: 80
-          initialDelaySeconds: 30
+            port: 3000
+          initialDelaySeconds: 10
           periodSeconds: 10
-      volumes:
-      - name: nginx-config
-        configMap:
-          name: nginx-config

@@ -1,8 +1,8 @@
 # Execution Engine Dockerfile
-FROM node:18-alpine
+FROM node:20-alpine
 
-# Install Docker CLI for container management
-RUN apk add --no-cache docker-cli
+# Install curl for health checks
+RUN apk add --no-cache curl
 
 # Set working directory
 WORKDIR /app
@@ -11,31 +11,30 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm ci
 
 # Copy source code
-COPY src/ ./src/
-COPY tsconfig.json ./
+COPY . .
 
 # Build the application
 RUN npm run build
 
-# Create non-root user (but still need docker group access)
-RUN addgroup -g 1001 -S appuser
-RUN adduser -S appuser -u 1001
+# Create non-root user
+RUN addgroup -g 1001 -S appuser && \
+    adduser -S appuser -u 1001 -G appuser
 
-# Change ownership of app directory
+# Change ownership
 RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
 
 # Expose port
-EXPOSE 8001
+EXPOSE 8002
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8001/health || exit 1
+    CMD curl -f http://localhost:8002/health || exit 1
 
 # Start the application
-CMD ["node", "dist/index.js"]
+CMD ["npm", "start"]

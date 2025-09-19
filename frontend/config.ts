@@ -4,7 +4,7 @@ export const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ||
 
 // API configuration
 export const apiConfig = {
-  baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:4000',
+  baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001',
   timeout: 30000,
 };
 

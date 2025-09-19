@@ -14,19 +14,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: mongodb
-  namespace: myco-platform
-spec:
-  ports:
-  - port: 27017
-    targetPort: 27017
-  selector:
-    app: mongodb
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
   name: redis
   namespace: myco-platform
 spec:
@@ -40,38 +27,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: weaviate
-  namespace: myco-platform
-spec:
-  ports:
-  - port: 8080
-    targetPort: 8080
-  selector:
-    app: weaviate
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ollama
-  namespace: myco-platform
-spec:
-  ports:
-  - port: 11434
-    targetPort: 11434
-  selector:
-    app: ollama
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
   name: backend
   namespace: myco-platform
 spec:
   ports:
-  - port: 3000
-    targetPort: 3000
+  - port: 3001
+    targetPort: 3001
   selector:
     app: backend
   type: ClusterIP
@@ -83,8 +44,8 @@ metadata:
   namespace: myco-platform
 spec:
   ports:
-  - port: 8000
-    targetPort: 8000
+  - port: 8001
+    targetPort: 8001
   selector:
     app: ai-engine
   type: ClusterIP
@@ -96,10 +57,36 @@ metadata:
   namespace: myco-platform
 spec:
   ports:
-  - port: 8001
-    targetPort: 8001
+  - port: 8002
+    targetPort: 8002
   selector:
     app: execution-engine
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: template-engine
+  namespace: myco-platform
+spec:
+  ports:
+  - port: 8003
+    targetPort: 8003
+  selector:
+    app: template-engine
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: validation-engine
+  namespace: myco-platform
+spec:
+  ports:
+  - port: 8004
+    targetPort: 8004
+  selector:
+    app: validation-engine
   type: ClusterIP
 ---
 apiVersion: v1
@@ -109,8 +96,8 @@ metadata:
   namespace: myco-platform
 spec:
   ports:
-  - port: 5173
-    targetPort: 5173
+  - port: 3000
+    targetPort: 3000
   selector:
     app: frontend
   type: ClusterIP
@@ -118,42 +105,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: nginx
+  name: myco-platform-ingress
   namespace: myco-platform
 spec:
   ports:
   - port: 80
-    targetPort: 80
-    name: http
-  - port: 443
-    targetPort: 443
-    name: https
-  selector:
-    app: nginx
-  type: LoadBalancer
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus
-  namespace: myco-platform
-spec:
-  ports:
-  - port: 9090
-    targetPort: 9090
-  selector:
-    app: prometheus
-  type: ClusterIP
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: grafana
-  namespace: myco-platform
-spec:
-  ports:
-  - port: 3000
     targetPort: 3000
   selector:
-    app: grafana
-  type: ClusterIP
+    app: frontend
+  type: LoadBalancer

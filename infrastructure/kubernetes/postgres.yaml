@@ -5,7 +5,7 @@ metadata:
   namespace: myco-platform
 type: Opaque
 stringData:
-  POSTGRES_DB: myco_platform
+  POSTGRES_DB: postgres
   POSTGRES_USER: postgres
   POSTGRES_PASSWORD: postgres
 

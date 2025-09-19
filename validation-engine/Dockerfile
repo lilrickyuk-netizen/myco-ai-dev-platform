@@ -1,4 +1,4 @@
-# Frontend Dockerfile - React + Vite Application
+# Validation Engine Dockerfile
 FROM node:20-alpine
 
 # Install curl for health checks
@@ -30,11 +30,11 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
-EXPOSE 3000
+EXPOSE 8004
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000 || exit 1
+    CMD curl -f http://localhost:8004/health || exit 1
 
-# Start the application in preview mode
-CMD ["npm", "run", "preview"]
+# Start the application
+CMD ["npm", "start"]

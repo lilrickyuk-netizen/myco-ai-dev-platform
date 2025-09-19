@@ -1,8 +1,8 @@
-# Backend Dockerfile - Encore.ts Application
-FROM node:18-alpine
+# Backend Dockerfile
+FROM node:20-alpine
 
-# Install encore
-RUN npm install -g @encore/cli
+# Install curl for health checks
+RUN apk add --no-cache curl
 
 # Set working directory
 WORKDIR /app
@@ -16,11 +16,8 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Generate Encore runtime files
-RUN encore gen
-
 # Build the application
-RUN encore build
+RUN npm run build
 
 # Create non-root user
 RUN addgroup -g 1001 -S appuser && \
@@ -33,11 +30,11 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:3001/health || exit 1
 
 # Start the application
-CMD ["encore", "run", "--prod"]
+CMD ["npm", "start"]

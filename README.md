@@ -1,21 +1,16 @@
-# 🚀 MYCO Platform - AI-Powered Development Platform
+# 🚀 MYCO AI Dev Platform
 
-[![CI/CD Pipeline](https://github.com/myco/platform/actions/workflows/ci.yml/badge.svg)](https://github.com/myco/platform/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/myco/platform/branch/main/graph/badge.svg)](https://codecov.io/gh/myco/platform)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/myco/platform/releases)
-
-The MYCO Platform is a revolutionary AI-powered development platform that **guarantees 100% complete project implementations**. Unlike traditional development platforms, MYCO ensures every project is fully implemented, tested, and deployment-ready through our advanced multi-agent AI system.
+The MYCO AI Dev Platform is a comprehensive development environment that combines AI-powered code generation with real-time collaboration tools, providing a complete solution for modern software development.
 
 ## ✨ Key Features
 
-- 🤖 **Multi-Agent AI System** - Orchestrated AI agents handle different aspects of development
-- 🎯 **100% Completion Guarantee** - Every project is fully implemented with no placeholders
+- 🤖 **AI-Powered Code Generation** - Generate code using multiple AI providers (OpenAI, Anthropic, Google)
+- 💻 **Integrated Development Environment** - Full-featured IDE with Monaco editor
 - 🔄 **Real-time Collaboration** - Work together with your team in real-time
-- 🚀 **One-Click Deployment** - Deploy to AWS, GCP, Azure, or any cloud provider
-- 🔒 **Enterprise Security** - SOC2 compliant with advanced security features
-- 📊 **Built-in Monitoring** - Comprehensive observability and performance metrics
-- 🌐 **Multi-Language Support** - JavaScript, TypeScript, Python, Java, Go, Rust, and more
+- 🚀 **Project Management** - Create, organize, and manage development projects
+- 🔒 **Secure Execution** - Safe code execution environment with containerization
+- 📊 **Template System** - Pre-built templates for common project types
+- 🌐 **Multi-Language Support** - JavaScript, TypeScript, Python, and more
 
 ## 🏗️ Architecture
 
@@ -27,15 +22,18 @@ The MYCO Platform is a revolutionary AI-powered development platform that **guar
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │                   Backend API                               │
-│              Encore.ts + Express + TypeScript              │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┬─────────────────┐
-        │              │              │                 │
-┌───────▼───────┐ ┌───▼────┐ ┌──────▼──────┐ ┌───────▼────┐
-│  AI Engine    │ │Database│ │  Execution  │ │ Validation │
-│   FastAPI     │ │Postgres│ │   Engine    │ │   Engine   │
-└───────────────┘ └────────┘ └─────────────┘ └────────────┘
+│                  Fastify + TypeScript                      │
+└──────────┬──────────────┬──────────────┬───────────────────┘
+           │              │              │                    
+┌──────────▼────┐ ┌──────▼────┐ ┌───────▼────┐ ┌────────▼────┐
+│  AI Engine   │ │Execution  │ │ Template   │ │ Validation  │
+│   FastAPI    │ │  Engine   │ │  Engine    │ │   Engine    │
+└──────────────┘ └───────────┘ └────────────┘ └─────────────┘
+                        
+┌──────────────────────────────────────────────────────────────┐
+│                      Data Layer                             │
+│                PostgreSQL + Redis                           │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -43,22 +41,19 @@ The MYCO Platform is a revolutionary AI-powered development platform that **guar
 ### Prerequisites
 
 - Docker and Docker Compose
-- Node.js 18+ and npm
+- Node.js 20+ and npm
 - Python 3.11+
 - Git
 
-### Local Development
+### One-Command Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/myco/platform.git
-cd platform
+git clone <your-repo-url>
+cd myco-ai-dev-platform
 
 # Copy environment configuration
 cp .env.example .env
-
-# Edit .env with your API keys (at minimum, add OPENAI_API_KEY)
-nano .env
 
 # Start all services
 docker-compose up
@@ -66,24 +61,42 @@ docker-compose up
 # The platform will be available at:
 # Frontend: http://localhost:3000
 # Backend API: http://localhost:3001
-# AI Engine: http://localhost:8000
+# AI Engine: http://localhost:8001
 ```
+
+### Environment Variables
+
+**Required for full AI functionality:**
+```env
+# AI Provider Configuration
+OPENAI_API_KEY=sk-your-openai-key        # For OpenAI GPT models
+ANTHROPIC_API_KEY=sk-ant-your-key        # For Claude models
+GOOGLE_API_KEY=your-google-key           # For Gemini models
+
+# Set to "stub" to run without API keys (local development)
+AI_PROVIDER=stub
+```
+
+**Note:** The platform works without API keys by using a stub provider that returns helpful demo responses.
 
 ### Health Check
 
 ```bash
 # Check if all services are running properly
-./scripts/health-check.sh
+./scripts/smoke.sh
 
 # Expected output:
-# ✓ All checks passed successfully!
+# ✓ All services healthy
+# ✓ Can create project
+# ✓ Can generate AI content
+# ✓ All checks passed!
 ```
 
-### Default Credentials
+### Login
 
-- **Admin User**: admin@myco.dev / admin123
-- **Grafana**: admin / admin
-- **MinIO**: minioadmin / minioadmin
+Use any email address to sign in (demo mode):
+- Email: `demo@myco.dev` (or any email)
+- The platform will create a session automatically
 
 ## 📚 Documentation
 

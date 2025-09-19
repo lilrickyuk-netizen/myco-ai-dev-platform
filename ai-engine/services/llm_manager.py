@@ -58,20 +58,34 @@ class LLMManager:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.providers = {}
-        self.default_provider = LLMProvider.OPENAI
+        self.default_provider = LLMProvider.LOCAL  # Start with local/stub
         self.configs = {}
         self._initialize_providers()
     
+    async def initialize(self):
+        """Initialize the LLM Manager"""
+        self.logger.info("LLM Manager initialized")
+        
+    async def cleanup(self):
+        """Cleanup resources"""
+        self.logger.info("LLM Manager cleanup completed")
+    
     def _initialize_providers(self):
         """Initialize available LLM providers"""
+        
+        # Check AI_PROVIDER environment variable
+        ai_provider = os.getenv("AI_PROVIDER", "").lower()
+        
         # OpenAI
         if openai and os.getenv("OPENAI_API_KEY"):
             self.providers[LLMProvider.OPENAI] = openai
             self.configs[LLMProvider.OPENAI] = LLMConfig(
                 provider=LLMProvider.OPENAI,
-                model="gpt-4",
+                model="gpt-3.5-turbo",
                 api_key=os.getenv("OPENAI_API_KEY")
             )
+            if ai_provider == "openai" or not ai_provider:
+                self.default_provider = LLMProvider.OPENAI
             self.logger.info("OpenAI provider initialized")
         
         # Anthropic
@@ -84,19 +98,9 @@ class LLMManager:
                 model="claude-3-sonnet-20240229",
                 api_key=os.getenv("ANTHROPIC_API_KEY")
             )
+            if ai_provider == "anthropic":
+                self.default_provider = LLMProvider.ANTHROPIC
             self.logger.info("Anthropic provider initialized")
-        
-        # Cohere
-        if CohereClient and os.getenv("COHERE_API_KEY"):
-            self.providers[LLMProvider.COHERE] = CohereClient(
-                api_key=os.getenv("COHERE_API_KEY")
-            )
-            self.configs[LLMProvider.COHERE] = LLMConfig(
-                provider=LLMProvider.COHERE,
-                model="command-r-plus",
-                api_key=os.getenv("COHERE_API_KEY")
-            )
-            self.logger.info("Cohere provider initialized")
         
         # Google
         if genai and os.getenv("GOOGLE_API_KEY"):
@@ -107,19 +111,25 @@ class LLMManager:
                 model="gemini-pro",
                 api_key=os.getenv("GOOGLE_API_KEY")
             )
+            if ai_provider == "google" or ai_provider == "gemini":
+                self.default_provider = LLMProvider.GOOGLE
             self.logger.info("Google provider initialized")
         
-        if not self.providers:
-            self.logger.warning("No LLM providers initialized. Check API keys.")
-            # Add stub provider for development/testing
-            self.providers[LLMProvider.LOCAL] = "stub"
-            self.configs[LLMProvider.LOCAL] = LLMConfig(
-                provider=LLMProvider.LOCAL,
-                model="stub-model",
-                api_key=None
-            )
+        # Always add stub provider
+        self.providers[LLMProvider.LOCAL] = "stub"
+        self.configs[LLMProvider.LOCAL] = LLMConfig(
+            provider=LLMProvider.LOCAL,
+            model="stub-model",
+            api_key=None
+        )
+        
+        # Use stub as default if specified or no other providers available
+        if ai_provider == "stub" or not self.providers or len(self.providers) == 1:
             self.default_provider = LLMProvider.LOCAL
-            self.logger.info("Stub provider initialized for development")
+            self.logger.info("Using stub provider as default")
+        
+        if not self.providers or len(self.providers) == 1:
+            self.logger.warning("No external LLM providers initialized. Using stub provider.")
     
     async def generate(
         self, 
@@ -447,9 +457,10 @@ Please provide:
             LLMProvider.OPENAI: ["gpt-4", "gpt-3.5-turbo", "gpt-4-turbo-preview"],
             LLMProvider.ANTHROPIC: ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
             LLMProvider.COHERE: ["command-r-plus", "command-r", "command"],
-            LLMProvider.GOOGLE: ["gemini-pro", "gemini-pro-vision"]
+            LLMProvider.GOOGLE: ["gemini-pro", "gemini-pro-vision"],
+            LLMProvider.LOCAL: ["stub-model"]
         }
-        return model_map.get(provider, [])
+        return model_map.get(provider, ["stub-model"])
     
     async def _generate_stub(self, prompt: str, config: LLMConfig) -> LLMResponse:
         """Generate stub response for development/testing when no API keys available"""
