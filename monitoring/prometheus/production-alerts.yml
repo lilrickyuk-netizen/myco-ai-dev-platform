@@ -1,0 +1,220 @@
+groups:
+  - name: myco-production-alerts
+    rules:
+      # Infrastructure Alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% for 5 minutes on {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 85% for 5 minutes on {{ $labels.instance }}"
+
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_free_bytes / node_filesystem_size_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space low"
+          description: "Disk usage is above 85% for 5 minutes on {{ $labels.instance }}"
+
+      # Application Performance Alerts
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(myco_backend_http_request_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s for backend"
+
+      - alert: HighErrorRate
+        expr: rate(myco_backend_http_requests_total{status_code=~"5.."}[5m]) / rate(myco_backend_http_requests_total[5m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }}% for backend"
+
+      - alert: LowThroughput
+        expr: rate(myco_backend_http_requests_total[5m]) < 10
+        for: 10m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "Low throughput detected"
+          description: "Request rate is {{ $value }} rps for backend"
+
+      # Database Alerts
+      - alert: DatabaseConnectionsHigh
+        expr: myco_backend_database_connections_active > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database connections"
+          description: "Database has {{ $value }} active connections"
+
+      - alert: DatabaseQueryTimeHigh
+        expr: histogram_quantile(0.95, rate(myco_backend_database_query_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database query time"
+          description: "95th percentile database query time is {{ $value }}s"
+
+      # AI Engine Specific Alerts
+      - alert: LLMRequestTimeHigh
+        expr: histogram_quantile(0.95, rate(myco_ai_engine_llm_request_duration_seconds_bucket[5m])) > 60
+        for: 2m
+        labels:
+          severity: warning
+          service: ai-engine
+        annotations:
+          summary: "LLM request time high"
+          description: "95th percentile LLM request time is {{ $value }}s"
+
+      - alert: LLMTokenUsageSpike
+        expr: rate(myco_ai_engine_llm_tokens_used_total[5m]) > 10000
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-engine
+        annotations:
+          summary: "LLM token usage spike"
+          description: "LLM token usage rate is {{ $value }} tokens/second"
+
+      - alert: AgentSessionsHigh
+        expr: sum(myco_ai_engine_agent_sessions_active) > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-engine
+        annotations:
+          summary: "High number of active agent sessions"
+          description: "There are {{ $value }} active agent sessions"
+
+      # Security Alerts
+      - alert: UnauthorizedRequestsHigh
+        expr: rate(myco_backend_http_requests_total{status_code="401"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          security: true
+        annotations:
+          summary: "High number of unauthorized requests"
+          description: "Unauthorized request rate is {{ $value }} per second"
+
+      - alert: ForbiddenRequestsHigh
+        expr: rate(myco_backend_http_requests_total{status_code="403"}[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          security: true
+        annotations:
+          summary: "High number of forbidden requests"
+          description: "Forbidden request rate is {{ $value }} per second"
+
+      # Business Metrics Alerts
+      - alert: UserSignupsLow
+        expr: rate(myco_backend_projects_created_total[1h]) < 1
+        for: 1h
+        labels:
+          severity: info
+          business: true
+        annotations:
+          summary: "Low project creation rate"
+          description: "Project creation rate is {{ $value }} per hour"
+
+      - alert: CodeGenerationFailureHigh
+        expr: rate(myco_ai_engine_llm_requests_total{status="error",type="code_generation"}[5m]) / rate(myco_ai_engine_llm_requests_total{type="code_generation"}[5m]) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          business: true
+        annotations:
+          summary: "High code generation failure rate"
+          description: "Code generation failure rate is {{ $value }}%"
+
+      # Dependency Alerts
+      - alert: ExternalAPIDown
+        expr: up{job="external-apis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "External API is down"
+          description: "External API {{ $labels.instance }} is not responding"
+
+      # Cache Alerts
+      - alert: CacheHitRateLow
+        expr: rate(myco_ai_engine_cache_operations_total{result="hit"}[5m]) / rate(myco_ai_engine_cache_operations_total{operation="get"}[5m]) * 100 < 70
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value }}%"
+
+      - alert: CacheSizeHigh
+        expr: myco_ai_engine_cache_size_bytes > 1000000000  # 1GB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High cache size"
+          description: "Cache size is {{ $value | humanize }}B"
+
+      # Kubernetes Alerts (if deployed on K8s)
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pod is crash looping"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping"
+
+      - alert: PodNotReady
+        expr: kube_pod_status_ready{condition="false"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod is not ready"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is not ready"
+
+      # Resource Exhaustion Alerts
+      - alert: FileDescriptorLimitNear
+        expr: process_open_fds / process_max_fds * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "File descriptor limit near"
+          description: "Process is using {{ $value }}% of available file descriptors"
+
+      - alert: GoroutineCountHigh
+        expr: go_goroutines > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High goroutine count"
+          description: "Process has {{ $value }} goroutines"

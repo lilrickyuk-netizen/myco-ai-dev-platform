@@ -1,47 +1,47 @@
-// Clerk publishable key for authentication
-// Get this from your Clerk dashboard at https://clerk.com
-export const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || "pk_test_c3RpcnJpbmctcGVyY2gtMTUuY2xlcmsuYWNjb3VudHMuZGV2JA";
-
-// API configuration
-export const apiConfig = {
-  baseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001',
-  timeout: 30000,
-};
-
-// Feature flags
-export const features = {
-  enableCollaboration: true,
-  enableAIAssistant: true,
-  enableAdvancedTemplates: true,
-  enableDeployment: true,
-  enableAgents: true,
-};
-
-// Editor configuration
-export const editorConfig = {
-  theme: 'vs-dark',
-  fontSize: 14,
-  lineNumbers: 'on' as const,
-  minimap: { enabled: true },
-  wordWrap: 'on' as const,
-  automaticLayout: true,
-  scrollBeyondLastLine: false,
-  quickSuggestions: true,
-  suggestOnTriggerCharacters: true,
-  tabSize: 2,
-  insertSpaces: true,
-};
-
-// Terminal configuration
-export const terminalConfig = {
-  cursorBlink: true,
-  cursorStyle: 'block' as const,
-  fontFamily: 'Monaco, Menlo, monospace',
-  fontSize: 13,
-  theme: {
-    background: '#1e1e1e',
-    foreground: '#d4d4d4',
-    cursor: '#ffffff',
-    selection: '#264f78',
+// Configuration values for the frontend application
+export const config = {
+  // API base URL - set to empty string to use relative URLs
+  apiBaseUrl: process.env.VITE_API_BASE_URL || '',
+  
+  // Environment
+  environment: process.env.NODE_ENV || 'development',
+  
+  // Feature flags
+  enableExperimentalFeatures: process.env.VITE_ENABLE_EXPERIMENTAL === 'true',
+  
+  // Clerk authentication configuration
+  // Fill in your Clerk publishable key from your Clerk dashboard
+  clerkPublishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || '',
+  
+  // Application metadata
+  appName: 'MYCO AI Dev Platform',
+  appVersion: '1.0.0',
+  
+  // Query client defaults
+  queryClient: {
+    defaultStaleTime: 60000, // 1 minute
+    defaultCacheTime: 300000, // 5 minutes
+    retryCount: 3,
   },
-};
+  
+  // File size limits
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+  
+  // Code editor settings
+  editor: {
+    defaultTheme: 'vs-dark',
+    defaultFontSize: 14,
+    defaultTabSize: 2,
+  },
+  
+  // AI generation limits
+  ai: {
+    maxPromptLength: 32000,
+    maxResponseLength: 8000,
+    defaultModel: 'gpt-3.5-turbo',
+    defaultTemperature: 0.7,
+    defaultMaxTokens: 2000,
+  },
+} as const;
+
+export default config;

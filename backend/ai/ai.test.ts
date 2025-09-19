@@ -1,282 +1,135 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { generate, chat } from "./ai";
-import type { GenerateRequest } from "./types";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { generateCode, chat, getModels } from './ai';
+import type { GenerateCodeRequest, ChatRequest } from './types';
 
-// Mock the auth module
-vi.mock("~encore/auth", () => ({
-  getAuthData: vi.fn(() => ({
-    userID: "test-user-123",
-    email: "test@example.com"
-  }))
+vi.mock('~encore/auth', () => ({
+  requireUser: vi.fn().mockReturnValue({ id: 'test-user' })
 }));
 
-// Mock the database module
-const mockDb = {
-  queryRow: vi.fn(),
-  exec: vi.fn(),
-};
-
-vi.mock("../db", () => ({
-  default: mockDb
-}));
-
-// Mock fetch globally
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
-
-describe("AI Service", () => {
+describe('AI Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset environment variables
-    process.env.AI_ENGINE_URL = "http://test-ai-engine:8001";
   });
 
-  describe("generate", () => {
-    it("should validate prompt is required", async () => {
-      const req: GenerateRequest = {
-        prompt: "",
-        model: "gpt-3.5-turbo"
+  describe('generateCode', () => {
+    it('should generate code successfully', async () => {
+      const request: GenerateCodeRequest = {
+        prompt: 'Create a React component',
+        framework: 'react',
+        language: 'typescript'
       };
 
-      await expect(generate(req)).rejects.toThrow("Valid prompt is required");
+      const result = await generateCode(request);
+
+      expect(result).toHaveProperty('code');
+      expect(result).toHaveProperty('explanation');
+      expect(result.code).toContain('React');
+      expect(result.framework).toBe('react');
+      expect(result.language).toBe('typescript');
     });
 
-    it("should validate prompt length", async () => {
-      const req: GenerateRequest = {
-        prompt: "a".repeat(33000),
-        model: "gpt-3.5-turbo"
+    it('should handle empty prompt', async () => {
+      const request: GenerateCodeRequest = {
+        prompt: '',
+        framework: 'react',
+        language: 'typescript'
       };
 
-      await expect(generate(req)).rejects.toThrow("Prompt too long");
+      await expect(generateCode(request)).rejects.toThrow('Prompt is required');
     });
 
-    it("should validate project access when projectId provided", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
-
-      const req: GenerateRequest = {
-        prompt: "test prompt",
-        projectId: "invalid-project"
+    it('should handle invalid framework', async () => {
+      const request: GenerateCodeRequest = {
+        prompt: 'Create a component',
+        framework: 'invalid' as any,
+        language: 'typescript'
       };
 
-      await expect(generate(req)).rejects.toThrow("Access denied to this project");
+      await expect(generateCode(request)).rejects.toThrow('Unsupported framework');
     });
 
-    it("should successfully generate text", async () => {
-      // Mock project access check
-      mockDb.queryRow.mockResolvedValue({ id: "project-123" });
-      mockDb.exec.mockResolvedValue(undefined);
-
-      // Mock AI Engine response
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          choices: [{
-            message: {
-              content: "Generated response"
-            }
-          }],
-          usage: {
-            prompt_tokens: 10,
-            completion_tokens: 20,
-            total_tokens: 30
-          }
-        })
-      });
-
-      const req: GenerateRequest = {
-        prompt: "test prompt",
-        projectId: "project-123",
-        model: "gpt-3.5-turbo"
+    it('should handle different languages', async () => {
+      const request: GenerateCodeRequest = {
+        prompt: 'Create a function',
+        framework: 'express',
+        language: 'javascript'
       };
 
-      const result = await generate(req);
+      const result = await generateCode(request);
 
-      expect(result.content).toBe("Generated response");
-      expect(result.usage?.totalTokens).toBe(30);
-      expect(mockDb.exec).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO ai_generations"),
-        expect.any(String), // user_id
-        "project-123",
-        "test prompt",
-        "Generated response",
-        "gpt-3.5-turbo",
-        10, 20, 30
-      );
-    });
-
-    it("should handle AI Engine timeout", async () => {
-      mockDb.queryRow.mockResolvedValue({ id: "project-123" });
-      
-      // Mock timeout by rejecting after delay
-      mockFetch.mockImplementation(() => 
-        new Promise((_, reject) => {
-          setTimeout(() => reject({ name: 'AbortError' }), 100);
-        })
-      );
-
-      const req: GenerateRequest = {
-        prompt: "test prompt",
-        projectId: "project-123"
-      };
-
-      await expect(generate(req)).rejects.toThrow("Request timeout");
-    });
-
-    it("should handle AI Engine rate limit", async () => {
-      mockDb.queryRow.mockResolvedValue({ id: "project-123" });
-      
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 429,
-        json: async () => ({ error: "Rate limited" })
-      });
-
-      const req: GenerateRequest = {
-        prompt: "test prompt",
-        projectId: "project-123"
-      };
-
-      await expect(generate(req)).rejects.toThrow("Rate limit exceeded");
-    });
-
-    it("should handle AI Engine server error", async () => {
-      mockDb.queryRow.mockResolvedValue({ id: "project-123" });
-      
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 503,
-        json: async () => ({ error: "Service unavailable" })
-      });
-
-      const req: GenerateRequest = {
-        prompt: "test prompt",
-        projectId: "project-123"
-      };
-
-      await expect(generate(req)).rejects.toThrow("AI service temporarily unavailable");
+      expect(result.language).toBe('javascript');
+      expect(result.code).toBeDefined();
     });
   });
 
-  describe("chat", () => {
-    it("should validate messages array", async () => {
-      const req = {
-        messages: []
+  describe('chat', () => {
+    it('should handle chat message successfully', async () => {
+      const request: ChatRequest = {
+        message: 'How do I create a React component?',
+        context: {
+          projectId: 'test-project',
+          files: []
+        }
       };
 
-      await expect(chat(req)).rejects.toThrow("Messages array is required");
+      const result = await chat(request);
+
+      expect(result).toHaveProperty('response');
+      expect(result).toHaveProperty('suggestions');
+      expect(result.response).toContain('component');
+      expect(Array.isArray(result.suggestions)).toBe(true);
     });
 
-    it("should validate last message is from user", async () => {
-      const req = {
-        messages: [{
-          id: "1",
-          role: "assistant" as const,
-          content: "Hello",
-          timestamp: new Date()
-        }]
+    it('should handle empty message', async () => {
+      const request: ChatRequest = {
+        message: '',
+        context: {
+          projectId: 'test-project',
+          files: []
+        }
       };
 
-      await expect(chat(req)).rejects.toThrow("Last message must be from user");
+      await expect(chat(request)).rejects.toThrow('Message is required');
     });
 
-    it("should create new session when sessionId not provided", async () => {
-      mockDb.queryRow
-        .mockResolvedValueOnce({ id: "project-123" }) // project access
-        .mockResolvedValueOnce({ id: "session-123" }); // new session
-      
-      mockDb.exec.mockResolvedValue(undefined);
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          choices: [{
-            message: {
-              content: "Chat response"
-            }
+    it('should include context in response', async () => {
+      const request: ChatRequest = {
+        message: 'Help with this file',
+        context: {
+          projectId: 'test-project',
+          files: [{
+            path: 'src/App.tsx',
+            content: 'import React from "react";'
           }]
-        })
-      });
-
-      const req = {
-        messages: [{
-          id: "1",
-          role: "user" as const,
-          content: "Hello",
-          timestamp: new Date()
-        }],
-        projectId: "project-123"
+        }
       };
 
-      const result = await chat(req);
+      const result = await chat(request);
 
-      expect(result.sessionId).toBe("session-123");
-      expect(result.message.content).toBe("Chat response");
-      expect(mockDb.exec).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO chat_sessions"),
-        expect.any(String), // user_id
-        "project-123",
-        "Hello"
-      );
+      expect(result.response).toBeDefined();
+      expect(result.contextUsed).toBe(true);
+    });
+  });
+
+  describe('getModels', () => {
+    it('should return available models', async () => {
+      const result = await getModels();
+
+      expect(Array.isArray(result.models)).toBe(true);
+      expect(result.models.length).toBeGreaterThan(0);
+      expect(result.models[0]).toHaveProperty('id');
+      expect(result.models[0]).toHaveProperty('name');
+      expect(result.models[0]).toHaveProperty('capabilities');
     });
 
-    it("should use existing session when sessionId provided", async () => {
-      mockDb.queryRow
-        .mockResolvedValueOnce({ id: "project-123" }) // project access
-        .mockResolvedValueOnce({ id: "session-123" }); // existing session
-      
-      mockDb.exec.mockResolvedValue(undefined);
+    it('should include model capabilities', async () => {
+      const result = await getModels();
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          choices: [{
-            message: {
-              content: "Chat response"
-            }
-          }]
-        })
-      });
+      const codeModel = result.models.find(m => m.capabilities.includes('code-generation'));
+      expect(codeModel).toBeDefined();
 
-      const req = {
-        sessionId: "session-123",
-        messages: [{
-          id: "1",
-          role: "user" as const,
-          content: "Hello",
-          timestamp: new Date()
-        }],
-        projectId: "project-123"
-      };
-
-      const result = await chat(req);
-
-      expect(result.sessionId).toBe("session-123");
-    });
-
-    it("should handle AI Engine error with fallback", async () => {
-      mockDb.queryRow
-        .mockResolvedValueOnce({ id: "project-123" }) // project access
-        .mockResolvedValueOnce({ id: "session-123" }); // session
-      
-      mockDb.exec.mockResolvedValue(undefined);
-
-      mockFetch.mockRejectedValue(new Error("Network error"));
-
-      const req = {
-        sessionId: "session-123",
-        messages: [{
-          id: "1",
-          role: "user" as const,
-          content: "Hello",
-          timestamp: new Date()
-        }],
-        projectId: "project-123"
-      };
-
-      const result = await chat(req);
-
-      expect(result.message.content).toContain("technical difficulties");
-      expect(result.sessionId).toBe("session-123");
+      const chatModel = result.models.find(m => m.capabilities.includes('chat'));
+      expect(chatModel).toBeDefined();
     });
   });
 });

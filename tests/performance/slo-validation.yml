@@ -1,57 +1,185 @@
-config:
-  target: "{{ $processEnvironment.STAGING_URL }}"
-  phases:
-    - duration: 60
-      arrivalRate: 5
-      name: "Warm up"
-    - duration: 120
-      arrivalRate: 10
-      name: "Load test"
-    - duration: 60
-      arrivalRate: 20
-      name: "Peak load"
-  processor: "./slo-processor.js"
+# SLO Validation Configuration
+# Used by CI/CD pipeline to validate Service Level Objectives
+
+slos:
+  # Backend API SLOs
+  backend:
+    availability:
+      threshold: 99.5  # 99.5% uptime
+      measurement_window: "30m"
+      query: "(1 - (rate(myco_backend_http_requests_total{status_code=~\"5..\"}[30m]) / rate(myco_backend_http_requests_total[30m]))) * 100"
+      
+    latency:
+      threshold: 2000  # 2 seconds
+      percentile: 95
+      measurement_window: "30m"
+      query: "histogram_quantile(0.95, rate(myco_backend_http_request_duration_seconds_bucket[30m])) * 1000"
+      
+    error_rate:
+      threshold: 0.5  # 0.5%
+      measurement_window: "30m"
+      query: "rate(myco_backend_http_requests_total{status_code=~\"5..\"}[30m]) / rate(myco_backend_http_requests_total[30m]) * 100"
+      
+    throughput:
+      threshold: 100  # 100 requests per second
+      measurement_window: "30m"
+      query: "rate(myco_backend_http_requests_total[30m])"
+
+  # AI Engine SLOs
+  ai_engine:
+    availability:
+      threshold: 99.5  # 99.5% uptime
+      measurement_window: "30m"
+      query: "(1 - (rate(myco_ai_engine_http_requests_total{status_code=~\"5..\"}[30m]) / rate(myco_ai_engine_http_requests_total[30m]))) * 100"
+      
+    latency:
+      threshold: 10000  # 10 seconds
+      percentile: 95
+      measurement_window: "30m"
+      query: "histogram_quantile(0.95, rate(myco_ai_engine_http_request_duration_seconds_bucket[30m])) * 1000"
+      
+    error_rate:
+      threshold: 0.5  # 0.5%
+      measurement_window: "30m"
+      query: "rate(myco_ai_engine_http_requests_total{status_code=~\"5..\"}[30m]) / rate(myco_ai_engine_http_requests_total[30m]) * 100"
+      
+    llm_latency:
+      threshold: 30000  # 30 seconds
+      percentile: 95
+      measurement_window: "30m"
+      query: "histogram_quantile(0.95, rate(myco_ai_engine_llm_request_duration_seconds_bucket[30m])) * 1000"
+      
+    llm_error_rate:
+      threshold: 5.0  # 5%
+      measurement_window: "30m"
+      query: "rate(myco_ai_engine_llm_requests_total{status=\"error\"}[30m]) / rate(myco_ai_engine_llm_requests_total[30m]) * 100"
+
+  # Database SLOs
+  database:
+    query_latency:
+      threshold: 1000  # 1 second
+      percentile: 95
+      measurement_window: "30m"
+      query: "histogram_quantile(0.95, rate(myco_backend_database_query_duration_seconds_bucket[30m])) * 1000"
+      
+    connection_utilization:
+      threshold: 80  # 80% of max connections
+      measurement_window: "5m"
+      query: "myco_backend_database_connections_active / 100 * 100"  # Assuming max 100 connections
+
+  # Business SLOs
+  business:
+    user_satisfaction:
+      threshold: 4.0  # Average rating of 4.0 or higher
+      measurement_window: "24h"
+      query: "avg_over_time(myco_ai_engine_user_satisfaction_score[24h])"
+      
+    code_generation_success_rate:
+      threshold: 95.0  # 95% success rate
+      measurement_window: "1h"
+      query: "rate(myco_ai_engine_code_generations_total[1h]) / rate(myco_ai_engine_llm_requests_total{type=\"code_generation\"}[1h]) * 100"
+
+# Rollback triggers
+rollback_triggers:
+  critical:
+    - backend.availability
+    - backend.error_rate
+    - ai_engine.availability
+    - ai_engine.error_rate
+    
+  warning:
+    - backend.latency
+    - ai_engine.latency
+    - ai_engine.llm_error_rate
+    
+  info:
+    - backend.throughput
+    - database.query_latency
+    - business.user_satisfaction
+
+# Measurement configuration
+measurement:
+  prometheus_url: "${PROMETHEUS_URL}"
+  auth_token: "${PROMETHEUS_TOKEN}"
+  timeout: 30s
+  retry_count: 3
+  retry_delay: 5s
+
+# Alert configuration
+alerts:
+  slack_webhook: "${SLACK_WEBHOOK_URL}"
+  email_recipients:
+    - "oncall@myco.ai"
+    - "platform-team@myco.ai"
   
-scenarios:
-  - name: "Health check"
-    weight: 10
-    flow:
-      - get:
-          url: "/health"
-          expect:
-            - statusCode: 200
+  templates:
+    slo_breach: |
+      🚨 SLO Breach Alert
+      
+      **Service**: {{ .service }}
+      **SLO**: {{ .slo_name }}
+      **Current Value**: {{ .current_value }}
+      **Threshold**: {{ .threshold }}
+      **Measurement Window**: {{ .window }}
+      **Time**: {{ .timestamp }}
+      
+      **Action Required**: {{ .action }}
+    
+    rollback_triggered: |
+      🔄 Automatic Rollback Triggered
+      
+      **Reason**: SLO breach detected
+      **Failed SLOs**: {{ .failed_slos }}
+      **Rollback Started**: {{ .rollback_start_time }}
+      **Estimated Completion**: {{ .rollback_eta }}
 
-  - name: "API endpoints"
-    weight: 70
-    flow:
-      - get:
-          url: "/api/auth/health"
-          expect:
-            - statusCode: 200
-      - get:
-          url: "/api/projects"
-          expect:
-            - statusCode: [200, 401]
-      - post:
-          url: "/api/ai/generate"
-          json:
-            prompt: "Hello world"
-          expect:
-            - statusCode: [200, 401]
+# Error budget configuration
+error_budget:
+  # Error budget consumption thresholds
+  thresholds:
+    critical: 90  # 90% of error budget consumed
+    warning: 75   # 75% of error budget consumed
+    info: 50      # 50% of error budget consumed
+  
+  # Burn rate alerting
+  burn_rate:
+    fast: 14.4   # 1% error budget in 1 hour
+    medium: 6    # 1% error budget in 2.5 hours
+    slow: 1      # 1% error budget in 1 day
+  
+  # Time windows for burn rate calculation
+  windows:
+    fast: "5m"
+    medium: "30m"
+    slow: "2h"
 
-  - name: "Frontend assets"
-    weight: 20
-    flow:
-      - get:
-          url: "/"
-          expect:
-            - statusCode: 200
-      - get:
-          url: "/static/js/main.js"
-          expect:
-            - statusCode: [200, 404]
-
-engines:
-  http:
-    timeout: 30
-    pool: 10
+# SLO reporting configuration
+reporting:
+  # Daily SLO report
+  daily_report:
+    enabled: true
+    time: "09:00"
+    timezone: "UTC"
+    recipients:
+      - "platform-team@myco.ai"
+      - "engineering-leads@myco.ai"
+  
+  # Weekly SLO summary
+  weekly_report:
+    enabled: true
+    day: "monday"
+    time: "09:00"
+    timezone: "UTC"
+    recipients:
+      - "leadership@myco.ai"
+      - "product-team@myco.ai"
+  
+  # Monthly SLO review
+  monthly_report:
+    enabled: true
+    day: 1
+    time: "09:00"
+    timezone: "UTC"
+    recipients:
+      - "executives@myco.ai"
+      - "board@myco.ai"

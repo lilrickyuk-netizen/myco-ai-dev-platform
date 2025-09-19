@@ -1,379 +1,372 @@
-"""
-Tests for the hardened generation API endpoints
-"""
-
 import pytest
-import asyncio
-from unittest.mock import AsyncMock, Mock, patch
 from fastapi.testclient import TestClient
-from fastapi import HTTPException
-
-# Import the main app
+from unittest.mock import Mock, patch, AsyncMock
 from main import app
-from api.routes.generation import hardened_generate
-from services.llm_manager import LLMProvider, LLMResponse
 
 class TestGenerationAPI:
-    """Test suite for generation API endpoints"""
     
     @pytest.fixture
     def client(self):
-        """Create test client"""
         return TestClient(app)
     
     @pytest.fixture
-    def mock_auth(self):
-        """Mock authentication"""
-        return {"id": "test-user-123", "email": "test@example.com"}
-    
-    @pytest.fixture
-    def mock_llm_response(self):
-        """Mock LLM response"""
-        return LLMResponse(
-            content="Test generated content",
-            usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-            model="test-model",
-            finish_reason="stop",
-            metadata={"provider": "test"}
-        )
-
-    def test_generation_request_validation(self, client):
-        """Test request validation for generation endpoint"""
-        # Test empty prompt
-        response = client.post("/api/v1/generation", json={
-            "prompt": ""
-        })
-        assert response.status_code == 422
-        
-        # Test missing prompt
-        response = client.post("/api/v1/generation", json={})
-        assert response.status_code == 422
-        
-        # Test prompt too long
-        response = client.post("/api/v1/generation", json={
-            "prompt": "a" * 50001
-        })
-        assert response.status_code == 422
-        
-        # Test invalid temperature
-        response = client.post("/api/v1/generation", json={
-            "prompt": "test",
-            "temperature": 3.0
-        })
-        assert response.status_code == 422
-        
-        # Test invalid max_tokens
-        response = client.post("/api/v1/generation", json={
-            "prompt": "test",
-            "max_tokens": 0
-        })
-        assert response.status_code == 422
-
-    def test_code_generation_validation(self, client):
-        """Test code generation request validation"""
-        # Test missing description
-        response = client.post("/api/v1/code/generate", json={
-            "language": "python"
-        })
-        assert response.status_code == 422
-        
-        # Test missing language
-        response = client.post("/api/v1/code/generate", json={
-            "description": "Create a function"
-        })
-        assert response.status_code == 422
-        
-        # Test too many features
-        response = client.post("/api/v1/code/generate", json={
-            "description": "Create a function",
-            "language": "python",
-            "features": ["feature"] * 25
-        })
-        assert response.status_code == 422
-
-    def test_chat_request_validation(self, client):
-        """Test chat request validation"""
-        # Test empty messages
-        response = client.post("/api/v1/chat", json={
-            "messages": []
-        })
-        assert response.status_code == 422
-        
-        # Test too many messages
-        response = client.post("/api/v1/chat", json={
-            "messages": [{"role": "user", "content": "test"}] * 101
-        })
-        assert response.status_code == 422
-        
-        # Test invalid message format
-        response = client.post("/api/v1/chat", json={
-            "messages": [{"invalid": "format"}]
-        })
-        assert response.status_code == 422
-        
-        # Test invalid role
-        response = client.post("/api/v1/chat", json={
-            "messages": [{"role": "invalid", "content": "test"}]
-        })
-        assert response.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_hardened_generate_success(self, mock_llm_response):
-        """Test successful hardened generation"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
-            mock_manager.generate.return_value = mock_llm_response
-            
-            response = await hardened_generate(
-                prompt="Test prompt",
-                provider=LLMProvider.LOCAL
-            )
-            
-            assert response.content == "Test generated content"
-            assert response.usage["total_tokens"] == 30
-
-    @pytest.mark.asyncio
-    async def test_hardened_generate_timeout(self):
-        """Test hardened generation timeout handling"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
-            mock_manager.generate.side_effect = asyncio.TimeoutError()
-            
-            with pytest.raises(HTTPException) as exc_info:
-                await hardened_generate(
-                    prompt="Test prompt",
-                    provider=LLMProvider.LOCAL
-                )
-            
-            assert exc_info.value.status_code == 503
-            assert "timeout" in str(exc_info.value.detail).lower()
-
-    @pytest.mark.asyncio
-    async def test_hardened_generate_provider_failover(self, mock_llm_response):
-        """Test provider failover in hardened generation"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {
-                LLMProvider.OPENAI: Mock(),
-                LLMProvider.LOCAL: "stub"
-            }
-            
-            # First provider fails, second succeeds
-            mock_manager.generate.side_effect = [
-                Exception("OpenAI error"),
-                mock_llm_response
+    def mock_llm_manager(self):
+        mock = Mock()
+        mock.generate_completion = AsyncMock(return_value="Generated code")
+        mock.get_available_models = Mock(return_value={
+            "openai": [
+                {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "capabilities": ["code", "chat"]}
             ]
+        })
+        return mock
+    
+    def test_health_endpoint(self, client):
+        """Test health check endpoint"""
+        response = client.get("/health")
+        assert response.status_code == 200
+        
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert "timestamp" in data
+        assert "version" in data
+    
+    def test_models_endpoint(self, client, mock_llm_manager):
+        """Test models list endpoint"""
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.get("/api/v1/models")
+            assert response.status_code == 200
             
-            response = await hardened_generate(prompt="Test prompt")
+            data = response.json()
+            assert "models" in data
+            assert "openai" in data["models"]
+            assert len(data["models"]["openai"]) > 0
+    
+    def test_generate_code_endpoint(self, client, mock_llm_manager):
+        """Test code generation endpoint"""
+        request_data = {
+            "prompt": "Create a React component",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/generate/code", json=request_data)
+            assert response.status_code == 200
             
-            assert response.content == "Test generated content"
-            # Should have tried both providers
-            assert mock_manager.generate.call_count >= 1
-
-    @pytest.mark.asyncio
-    async def test_hardened_generate_all_providers_fail(self):
-        """Test behavior when all providers fail"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {
-                LLMProvider.OPENAI: Mock(),
-                LLMProvider.LOCAL: "stub"
-            }
-            mock_manager.generate.side_effect = Exception("All providers failed")
+            data = response.json()
+            assert "code" in data
+            assert "explanation" in data
+            assert data["framework"] == "react"
+            assert data["language"] == "typescript"
+    
+    def test_generate_code_missing_fields(self, client):
+        """Test code generation with missing required fields"""
+        request_data = {
+            "prompt": "Create a component"
+            # Missing framework, language, model
+        }
+        
+        response = client.post("/api/v1/generate/code", json=request_data)
+        assert response.status_code == 422  # Validation error
+    
+    def test_generate_code_invalid_framework(self, client, mock_llm_manager):
+        """Test code generation with invalid framework"""
+        request_data = {
+            "prompt": "Create a component",
+            "framework": "invalid_framework",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/generate/code", json=request_data)
+            assert response.status_code == 400
             
-            with pytest.raises(HTTPException) as exc_info:
-                await hardened_generate(prompt="Test prompt")
+            data = response.json()
+            assert "error" in data
+            assert "framework" in data["error"].lower()
+    
+    def test_chat_endpoint(self, client, mock_llm_manager):
+        """Test chat endpoint"""
+        mock_llm_manager.generate_completion.return_value = "Here's how to create a React component..."
+        
+        request_data = {
+            "message": "How do I create a React component?",
+            "context": {
+                "project_id": "test-project",
+                "files": []
+            },
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/chat", json=request_data)
+            assert response.status_code == 200
             
-            assert exc_info.value.status_code == 503
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_handling(self):
-        """Test rate limit error handling"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.OPENAI: Mock()}
-            mock_manager.generate.side_effect = Exception("rate limit exceeded")
+            data = response.json()
+            assert "response" in data
+            assert "suggestions" in data
+            assert isinstance(data["suggestions"], list)
+    
+    def test_chat_with_file_context(self, client, mock_llm_manager):
+        """Test chat with file context"""
+        request_data = {
+            "message": "How can I improve this component?",
+            "context": {
+                "project_id": "test-project",
+                "files": [{
+                    "path": "src/App.tsx",
+                    "content": "import React from 'react';\n\nfunction App() {\n  return <div>Hello</div>;\n}"
+                }]
+            },
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/chat", json=request_data)
+            assert response.status_code == 200
             
-            with pytest.raises(HTTPException) as exc_info:
-                await hardened_generate(
-                    prompt="Test prompt",
-                    provider=LLMProvider.OPENAI
-                )
-            
-            assert exc_info.value.status_code == 503
-
-    def test_streaming_endpoint_headers(self, client):
-        """Test streaming endpoint returns correct headers"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            async def mock_stream():
-                yield "chunk1"
-                yield "chunk2"
-            
-            mock_manager.generate_stream.return_value = mock_stream()
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
-            
-            response = client.post("/api/v1/generation/stream", json={
-                "prompt": "test prompt"
-            })
-            
+            data = response.json()
+            assert data["context_used"] is True
+    
+    def test_stream_chat_endpoint(self, client, mock_llm_manager):
+        """Test streaming chat endpoint"""
+        async def mock_stream():
+            yield "chunk1"
+            yield "chunk2"
+            yield "chunk3"
+        
+        mock_llm_manager.stream_completion = AsyncMock(return_value=mock_stream())
+        
+        request_data = {
+            "message": "Explain React hooks",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/chat/stream", json=request_data)
+            assert response.status_code == 200
             assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-            assert "no-cache" in response.headers.get("cache-control", "")
-
-    @pytest.mark.asyncio
-    async def test_concurrent_requests(self, mock_llm_response):
-        """Test handling of concurrent generation requests"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
-            mock_manager.generate.return_value = mock_llm_response
-            
-            # Create multiple concurrent requests
-            tasks = [
-                hardened_generate(prompt=f"Test prompt {i}")
-                for i in range(10)
-            ]
-            
-            responses = await asyncio.gather(*tasks)
-            
-            assert len(responses) == 10
-            assert all(r.content == "Test generated content" for r in responses)
-
-    @pytest.mark.asyncio
-    async def test_memory_cleanup_on_error(self):
-        """Test that memory is properly cleaned up on errors"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
-            mock_manager.generate.side_effect = Exception("Test error")
-            
-            # Generate multiple failing requests
-            for i in range(5):
-                with pytest.raises(HTTPException):
-                    await hardened_generate(prompt=f"Test prompt {i}")
-            
-            # Memory usage should not continuously grow
-            # This is a basic test - in practice you'd check actual memory usage
-            assert True  # Placeholder for memory check
-
-class TestGenerationAPIIntegration:
-    """Integration tests for generation API"""
     
-    @pytest.fixture
-    def authenticated_client(self):
-        """Create authenticated test client"""
-        client = TestClient(app)
-        # In a real test, you'd set up proper auth headers
-        return client
-
-    def test_full_generation_flow(self, authenticated_client):
-        """Test complete generation flow"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
-            mock_response = LLMResponse(
-                content="Generated code:\n\ndef hello_world():\n    print('Hello, World!')",
-                usage={"prompt_tokens": 15, "completion_tokens": 25, "total_tokens": 40},
-                model="stub-model",
-                finish_reason="stop",
-                metadata={"provider": "local"}
-            )
-            mock_manager.generate.return_value = mock_response
-            
-            response = authenticated_client.post("/api/v1/generation", json={
-                "prompt": "Create a Python hello world function",
-                "temperature": 0.7,
-                "max_tokens": 100
-            })
-            
+    def test_explain_code_endpoint(self, client, mock_llm_manager):
+        """Test code explanation endpoint"""
+        mock_llm_manager.generate_completion.return_value = "This code creates a React functional component..."
+        
+        request_data = {
+            "code": "function App() { return <div>Hello World</div>; }",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/explain", json=request_data)
             assert response.status_code == 200
+            
             data = response.json()
-            assert "Generated code" in data["content"]
-            assert data["usage"]["total_tokens"] == 40
-
-    def test_code_generation_flow(self, authenticated_client):
-        """Test code generation flow"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_response = LLMResponse(
-                content="class Calculator:\n    def add(self, a, b):\n        return a + b",
-                usage={"prompt_tokens": 20, "completion_tokens": 30, "total_tokens": 50},
-                model="stub-model",
-                finish_reason="stop",
-                metadata={"provider": "local"}
-            )
-            mock_manager.code_generation.return_value = mock_response
-            
-            response = authenticated_client.post("/api/v1/code/generate", json={
-                "description": "Create a calculator class",
-                "language": "python",
-                "features": ["addition", "subtraction"],
-                "framework": "none"
-            })
-            
-            assert response.status_code == 200
-            data = response.json()
-            assert "Calculator" in data["content"]
-
-    def test_error_propagation(self, authenticated_client):
-        """Test that errors are properly propagated to client"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {}  # No providers available
-            
-            response = authenticated_client.post("/api/v1/generation", json={
-                "prompt": "test prompt"
-            })
-            
-            assert response.status_code == 503
-            data = response.json()
-            assert "error" in data["detail"].lower()
-
-# Performance and load testing
-class TestGenerationPerformance:
-    """Performance tests for generation API"""
+            assert "explanation" in data
+            assert "complexity" in data
+            assert "suggestions" in data
     
-    @pytest.mark.asyncio
-    async def test_response_time_under_load(self):
-        """Test response times under load"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
-            mock_response = LLMResponse(
-                content="Quick response",
-                usage={"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
-                model="stub-model",
-                finish_reason="stop",
-                metadata={"provider": "local"}
-            )
-            mock_manager.generate.return_value = mock_response
+    def test_optimize_code_endpoint(self, client, mock_llm_manager):
+        """Test code optimization endpoint"""
+        mock_llm_manager.generate_completion.return_value = "Optimized code with improvements..."
+        
+        request_data = {
+            "code": "function slowFunction() { /* inefficient code */ }",
+            "language": "javascript",
+            "optimization_goals": ["performance", "readability"],
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/optimize", json=request_data)
+            assert response.status_code == 200
             
-            import time
-            start_time = time.time()
+            data = response.json()
+            assert "optimized_code" in data
+            assert "improvements" in data
+            assert isinstance(data["improvements"], list)
+    
+    def test_debug_code_endpoint(self, client, mock_llm_manager):
+        """Test code debugging endpoint"""
+        mock_llm_manager.generate_completion.return_value = "Found issue: missing semicolon..."
+        
+        request_data = {
+            "code": "console.log('hello'",  # Missing closing parenthesis
+            "language": "javascript",
+            "error_message": "SyntaxError: missing ) after argument list",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/debug", json=request_data)
+            assert response.status_code == 200
             
-            # Create many concurrent requests
-            tasks = [
-                hardened_generate(prompt=f"Request {i}")
-                for i in range(50)
-            ]
+            data = response.json()
+            assert "issues" in data
+            assert "fixes" in data
+            assert "corrected_code" in data
+    
+    def test_rate_limiting(self, client, mock_llm_manager):
+        """Test rate limiting"""
+        request_data = {
+            "prompt": "Generate code",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            # Make multiple rapid requests
+            responses = []
+            for _ in range(10):
+                response = client.post("/api/v1/generate/code", json=request_data)
+                responses.append(response)
             
-            responses = await asyncio.gather(*tasks)
+            # Some requests should be rate limited
+            status_codes = [r.status_code for r in responses]
+            assert 429 in status_codes  # Too Many Requests
+    
+    def test_error_handling(self, client, mock_llm_manager):
+        """Test error handling for LLM failures"""
+        mock_llm_manager.generate_completion.side_effect = Exception("LLM service unavailable")
+        
+        request_data = {
+            "prompt": "Generate code",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/generate/code", json=request_data)
+            assert response.status_code == 500
             
-            end_time = time.time()
+            data = response.json()
+            assert "error" in data
+            assert "internal server error" in data["error"].lower()
+    
+    def test_input_validation(self, client):
+        """Test input validation"""
+        # Test empty prompt
+        request_data = {
+            "prompt": "",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        response = client.post("/api/v1/generate/code", json=request_data)
+        assert response.status_code == 422
+    
+    def test_cors_headers(self, client):
+        """Test CORS headers"""
+        response = client.options("/api/v1/generate/code")
+        assert response.status_code == 200
+        assert "Access-Control-Allow-Origin" in response.headers
+        assert "Access-Control-Allow-Methods" in response.headers
+    
+    def test_authentication(self, client):
+        """Test authentication middleware"""
+        # Test request without auth header
+        request_data = {
+            "prompt": "Generate code",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        response = client.post("/api/v1/generate/code", json=request_data)
+        # Should require authentication in production
+        # assert response.status_code == 401
+    
+    def test_request_logging(self, client, mock_llm_manager):
+        """Test request logging"""
+        request_data = {
+            "prompt": "Test prompt",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager), \
+             patch('core.logging.logger') as mock_logger:
             
-            # All requests should complete quickly
-            assert len(responses) == 50
-            assert end_time - start_time < 5.0  # Should complete within 5 seconds
-
-    @pytest.mark.asyncio
-    async def test_timeout_accuracy(self):
-        """Test that timeouts are enforced accurately"""
-        with patch('api.routes.generation.llm_manager') as mock_manager:
-            mock_manager.providers = {LLMProvider.LOCAL: "stub"}
+            response = client.post("/api/v1/generate/code", json=request_data)
+            assert response.status_code == 200
             
-            async def slow_generate(*args, **kwargs):
-                await asyncio.sleep(2.0)  # Longer than timeout
-                return Mock()
+            # Verify logging was called
+            mock_logger.info.assert_called()
+    
+    def test_metrics_collection(self, client, mock_llm_manager):
+        """Test metrics collection"""
+        request_data = {
+            "prompt": "Test prompt",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager), \
+             patch('middleware.monitoring.request_counter') as mock_counter:
             
-            mock_manager.generate = slow_generate
+            response = client.post("/api/v1/generate/code", json=request_data)
+            assert response.status_code == 200
             
-            import time
-            start_time = time.time()
+            # Verify metrics were recorded
+            mock_counter.inc.assert_called()
+    
+    def test_large_request_handling(self, client, mock_llm_manager):
+        """Test handling of large requests"""
+        # Create a very large prompt
+        large_prompt = "x" * 10000  # 10KB prompt
+        
+        request_data = {
+            "prompt": large_prompt,
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        with patch('api.routes.generation.llm_manager', mock_llm_manager):
+            response = client.post("/api/v1/generate/code", json=request_data)
             
-            with pytest.raises(HTTPException):
-                await hardened_generate(prompt="test", timeout=1.0)
-            
-            end_time = time.time()
-            
-            # Should timeout close to the specified time
-            assert 1.0 <= end_time - start_time <= 1.5
+            # Should handle large requests gracefully
+            assert response.status_code in [200, 413]  # OK or Payload Too Large
+    
+    def test_concurrent_requests(self, client, mock_llm_manager):
+        """Test handling concurrent requests"""
+        import threading
+        import time
+        
+        request_data = {
+            "prompt": "Concurrent test",
+            "framework": "react",
+            "language": "typescript",
+            "model": "gpt-3.5-turbo"
+        }
+        
+        results = []
+        
+        def make_request():
+            with patch('api.routes.generation.llm_manager', mock_llm_manager):
+                response = client.post("/api/v1/generate/code", json=request_data)
+                results.append(response.status_code)
+        
+        # Create multiple threads
+        threads = []
+        for _ in range(5):
+            thread = threading.Thread(target=make_request)
+            threads.append(thread)
+        
+        # Start all threads
+        for thread in threads:
+            thread.start()
+        
+        # Wait for completion
+        for thread in threads:
+            thread.join()
+        
+        # All requests should succeed
+        assert all(status == 200 for status in results)

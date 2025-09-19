@@ -1,300 +1,692 @@
 {
-  "dashboard": {
-    "id": null,
-    "title": "Myco AI Platform - Production Overview",
-    "tags": ["myco-ai", "production", "overview"],
-    "timezone": "browser",
-    "panels": [
+  "annotations": {
+    "list": [
       {
-        "id": 1,
-        "title": "Service Health Status",
-        "type": "stat",
-        "targets": [
-          {
-            "expr": "service_health{service=\"myco-ai-platform\"}",
-            "legendFormat": "Service Health"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "min": 0,
-            "max": 1,
-            "thresholds": {
-              "steps": [
-                {"color": "red", "value": 0},
-                {"color": "green", "value": 1}
-              ]
-            },
-            "mappings": [
-              {"options": {"0": {"text": "Unhealthy"}}, "type": "value"},
-              {"options": {"1": {"text": "Healthy"}}, "type": "value"}
-            ]
-          }
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
         },
-        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
-      },
-      {
-        "id": 2,
-        "title": "Request Rate (per second)",
-        "type": "stat",
-        "targets": [
-          {
-            "expr": "rate(http_requests_total{service=\"myco-ai-platform\"}[5m])",
-            "legendFormat": "Requests/sec"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "reqps",
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": 0},
-                {"color": "yellow", "value": 100},
-                {"color": "red", "value": 1000}
-              ]
-            }
-          }
-        },
-        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
-      },
-      {
-        "id": 3,
-        "title": "Error Rate (%)",
-        "type": "stat",
-        "targets": [
-          {
-            "expr": "http_request_error_rate{service=\"myco-ai-platform\"} * 100",
-            "legendFormat": "Error Rate"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "percent",
-            "min": 0,
-            "max": 100,
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": 0},
-                {"color": "yellow", "value": 1},
-                {"color": "red", "value": 5}
-              ]
-            }
-          }
-        },
-        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
-      },
-      {
-        "id": 4,
-        "title": "P95 Response Time",
-        "type": "stat",
-        "targets": [
-          {
-            "expr": "http_request_duration_seconds_p95{service=\"myco-ai-platform\"} * 1000",
-            "legendFormat": "P95 Latency"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "ms",
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": 0},
-                {"color": "yellow", "value": 1000},
-                {"color": "red", "value": 2000}
-              ]
-            }
-          }
-        },
-        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
-      },
-      {
-        "id": 5,
-        "title": "Request Volume",
-        "type": "timeseries",
-        "targets": [
-          {
-            "expr": "rate(http_requests_total{service=\"myco-ai-platform\"}[5m])",
-            "legendFormat": "Requests/sec"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "reqps",
-            "custom": {
-              "drawStyle": "line",
-              "lineInterpolation": "linear",
-              "lineWidth": 2,
-              "fillOpacity": 10
-            }
-          }
-        },
-        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8}
-      },
-      {
-        "id": 6,
-        "title": "Response Time Trends",
-        "type": "timeseries",
-        "targets": [
-          {
-            "expr": "http_request_duration_seconds_p95{service=\"myco-ai-platform\"} * 1000",
-            "legendFormat": "P95 Latency (ms)"
-          },
-          {
-            "expr": "avg(rate(http_request_duration_seconds_sum{service=\"myco-ai-platform\"}[5m]) / rate(http_request_duration_seconds_count{service=\"myco-ai-platform\"}[5m])) * 1000",
-            "legendFormat": "Average Latency (ms)"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "ms",
-            "custom": {
-              "drawStyle": "line",
-              "lineInterpolation": "linear",
-              "lineWidth": 2
-            }
-          }
-        },
-        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8}
-      },
-      {
-        "id": 7,
-        "title": "Memory Usage",
-        "type": "timeseries",
-        "targets": [
-          {
-            "expr": "nodejs_memory_usage_bytes{service=\"myco-ai-platform\",type=\"heapUsed\"} / 1024 / 1024",
-            "legendFormat": "Heap Used (MB)"
-          },
-          {
-            "expr": "nodejs_memory_usage_bytes{service=\"myco-ai-platform\",type=\"heapTotal\"} / 1024 / 1024",
-            "legendFormat": "Heap Total (MB)"
-          },
-          {
-            "expr": "nodejs_memory_usage_bytes{service=\"myco-ai-platform\",type=\"rss\"} / 1024 / 1024",
-            "legendFormat": "RSS (MB)"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "MB",
-            "custom": {
-              "drawStyle": "line",
-              "lineInterpolation": "linear",
-              "lineWidth": 2
-            }
-          }
-        },
-        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 17}
-      },
-      {
-        "id": 8,
-        "title": "Error Rate Over Time",
-        "type": "timeseries",
-        "targets": [
-          {
-            "expr": "http_request_error_rate{service=\"myco-ai-platform\"} * 100",
-            "legendFormat": "Error Rate (%)"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "percent",
-            "min": 0,
-            "custom": {
-              "drawStyle": "line",
-              "lineInterpolation": "linear",
-              "lineWidth": 2,
-              "fillOpacity": 20
-            },
-            "thresholds": {
-              "steps": [
-                {"color": "green", "value": 0},
-                {"color": "yellow", "value": 1},
-                {"color": "red", "value": 5}
-              ]
-            }
-          }
-        },
-        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 17}
-      },
-      {
-        "id": 9,
-        "title": "System Uptime",
-        "type": "stat",
-        "targets": [
-          {
-            "expr": "process_uptime_seconds{service=\"myco-ai-platform\"}",
-            "legendFormat": "Uptime"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "s",
-            "custom": {
-              "displayMode": "basic"
-            }
-          }
-        },
-        "gridPos": {"h": 4, "w": 8, "x": 0, "y": 26}
-      },
-      {
-        "id": 10,
-        "title": "Total Requests",
-        "type": "stat",
-        "targets": [
-          {
-            "expr": "http_requests_total{service=\"myco-ai-platform\"}",
-            "legendFormat": "Total Requests"
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": {
-              "displayMode": "basic"
-            }
-          }
-        },
-        "gridPos": {"h": 4, "w": 8, "x": 8, "y": 26}
-      },
-      {
-        "id": 11,
-        "title": "SLO Compliance",
-        "type": "table",
-        "targets": [
-          {
-            "expr": "http_request_duration_seconds_p95{service=\"myco-ai-platform\"} <= 2",
-            "legendFormat": "P95 Latency SLO",
-            "format": "table",
-            "instant": true
-          },
-          {
-            "expr": "http_request_error_rate{service=\"myco-ai-platform\"} <= 0.01",
-            "legendFormat": "Error Rate SLO",
-            "format": "table",
-            "instant": true
-          }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "mappings": [
-              {"options": {"0": {"text": "❌ Breach"}}, "type": "value"},
-              {"options": {"1": {"text": "✅ Compliant"}}, "type": "value"}
-            ]
-          }
-        },
-        "gridPos": {"h": 4, "w": 8, "x": 16, "y": 26}
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
       }
-    ],
-    "time": {
-      "from": "now-1h",
-      "to": "now"
+    ]
+  },
+  "description": "Production overview dashboard for MYCO AI Dev Platform",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(myco_backend_http_requests_total[5m])",
+          "interval": "",
+          "legendFormat": "Backend - {{method}} {{route}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(myco_ai_engine_http_requests_total[5m])",
+          "interval": "",
+          "legendFormat": "AI Engine - {{method}} {{endpoint}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Request Rate",
+      "type": "timeseries"
     },
-    "refresh": "30s",
-    "schemaVersion": 30,
-    "version": 1,
-    "editable": true,
-    "graphTooltip": 1,
-    "links": []
-  }
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, rate(myco_backend_http_request_duration_seconds_bucket[5m]))",
+          "interval": "",
+          "legendFormat": "Backend P95",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, rate(myco_ai_engine_http_request_duration_seconds_bucket[5m]))",
+          "interval": "",
+          "legendFormat": "AI Engine P95",
+          "refId": "B"
+        }
+      ],
+      "title": "Response Time P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "myco_backend_slo_availability{service=\"backend\"}",
+          "interval": "",
+          "legendFormat": "Backend Availability",
+          "refId": "A"
+        }
+      ],
+      "title": "Backend Availability",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "myco_ai_engine_slo_availability",
+          "interval": "",
+          "legendFormat": "AI Engine Availability",
+          "refId": "A"
+        }
+      ],
+      "title": "AI Engine Availability",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "myco_backend_slo_error_rate{service=\"backend\"}",
+          "interval": "",
+          "legendFormat": "Backend Error Rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Backend Error Rate",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "9.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "myco_ai_engine_slo_error_rate",
+          "interval": "",
+          "legendFormat": "AI Engine Error Rate",
+          "refId": "A"
+        }
+      ],
+      "title": "AI Engine Error Rate",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "myco_ai_engine_llm_requests_total",
+          "interval": "",
+          "legendFormat": "{{provider}} - {{model}} - {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "LLM Requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(myco_ai_engine_llm_tokens_used_total[5m])",
+          "interval": "",
+          "legendFormat": "{{provider}} - {{model}} - {{type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Token Usage Rate",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": [
+    "production",
+    "myco",
+    "ai-platform"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "MYCO AI Platform - Production Overview",
+  "uid": "myco-production-overview",
+  "version": 1,
+  "weekStart": ""
 }

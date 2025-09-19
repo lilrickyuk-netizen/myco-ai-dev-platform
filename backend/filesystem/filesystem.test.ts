@@ -1,312 +1,235 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { listFiles, getFile, createFile, updateFile, deleteFile } from "./filesystem";
-import type { CreateFileRequest, UpdateFileRequest } from "./types";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { listFiles, readFile, writeFile, deleteFile, createDirectory } from './filesystem';
+import type { WriteFileRequest, CreateDirectoryRequest } from './types';
 
-// Mock the auth module
-const mockAuth = {
-  userID: "test-user-123",
-  email: "test@example.com"
-};
-
-vi.mock("~encore/auth", () => ({
-  getAuthData: vi.fn(() => mockAuth)
+vi.mock('~encore/auth', () => ({
+  requireUser: vi.fn().mockReturnValue({ id: 'test-user' })
 }));
 
-// Mock the database module
-const mockDb = {
-  queryAll: vi.fn(),
-  queryRow: vi.fn(),
-  exec: vi.fn(),
-  begin: vi.fn(),
-};
-
-vi.mock("../db", () => ({
-  default: mockDb
+vi.mock('fs/promises', () => ({
+  readdir: vi.fn(),
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
+  unlink: vi.fn(),
+  mkdir: vi.fn(),
+  stat: vi.fn()
 }));
 
-describe("Filesystem Service", () => {
+vi.mock('path', () => ({
+  join: vi.fn((...args) => args.join('/')),
+  resolve: vi.fn((path) => `/workspace/${path}`),
+  dirname: vi.fn((path) => path.split('/').slice(0, -1).join('/'))
+}));
+
+describe('Filesystem Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe("listFiles", () => {
-    it("should validate project ID", async () => {
-      await expect(listFiles({ projectId: "" })).rejects.toThrow("Valid project ID is required");
+  describe('listFiles', () => {
+    it('should list files in directory', async () => {
+      const projectId = 'test-project';
+      const path = 'src';
+
+      // Mock fs response
+      vi.mocked(require('fs/promises').readdir).mockResolvedValueOnce([
+        { name: 'App.tsx', isDirectory: () => false, isFile: () => true },
+        { name: 'components', isDirectory: () => true, isFile: () => false },
+        { name: 'utils.ts', isDirectory: () => false, isFile: () => true }
+      ]);
+
+      const result = await listFiles(projectId, path);
+
+      expect(Array.isArray(result.files)).toBe(true);
+      expect(result.files).toHaveLength(3);
+      expect(result.files[0].name).toBe('App.tsx');
+      expect(result.files[0].type).toBe('file');
+      expect(result.files[1].name).toBe('components');
+      expect(result.files[1].type).toBe('directory');
     });
 
-    it("should return hierarchical file structure", async () => {
-      const mockFiles = [
-        {
-          id: "file-1",
-          project_id: "project-123",
-          name: "src",
-          path: "/src",
-          type: "directory",
-          parent_id: null,
-          content: null,
-          size: 0,
-          created_at: new Date(),
-          updated_at: new Date()
-        },
-        {
-          id: "file-2",
-          project_id: "project-123",
-          name: "App.tsx",
-          path: "/src/App.tsx",
-          type: "file",
-          parent_id: "file-1",
-          content: "import React from 'react';",
-          size: 23,
-          created_at: new Date(),
-          updated_at: new Date()
-        }
-      ];
+    it('should handle empty directory', async () => {
+      const projectId = 'test-project';
+      const path = 'empty';
 
-      mockDb.queryRow.mockResolvedValue({ id: "project-123" }); // project access
-      mockDb.queryAll.mockResolvedValue(mockFiles);
+      vi.mocked(require('fs/promises').readdir).mockResolvedValueOnce([]);
 
-      const result = await listFiles({ projectId: "project-123" });
+      const result = await listFiles(projectId, path);
 
-      expect(result.files).toHaveLength(1); // Only root directory
-      expect(result.files[0].name).toBe("src");
-      expect(result.files[0].type).toBe("directory");
-      expect(result.files[0].children).toHaveLength(1);
-      expect(result.files[0].children![0].name).toBe("App.tsx");
+      expect(result.files).toHaveLength(0);
     });
 
-    it("should handle project access denied", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
+    it('should handle non-existent directory', async () => {
+      const projectId = 'test-project';
+      const path = 'non-existent';
 
-      await expect(listFiles({ projectId: "invalid-project" })).rejects.toThrow("Access denied to this project");
-    });
-  });
-
-  describe("getFile", () => {
-    it("should validate file ID", async () => {
-      await expect(getFile({ id: "" })).rejects.toThrow("Valid file ID is required");
-    });
-
-    it("should return file details", async () => {
-      const mockFile = {
-        id: "file-123",
-        project_id: "project-123",
-        name: "App.tsx",
-        path: "/src/App.tsx",
-        type: "file",
-        parent_id: "dir-1",
-        content: "import React from 'react';",
-        size: 23,
-        created_at: new Date(),
-        updated_at: new Date(),
-        project_owner_id: "test-user-123"
-      };
-
-      mockDb.queryRow.mockResolvedValue(mockFile);
-
-      const result = await getFile({ id: "file-123" });
-
-      expect(result.id).toBe("file-123");
-      expect(result.name).toBe("App.tsx");
-      expect(result.content).toBe("import React from 'react';");
-      expect(result.size).toBe(23);
-    });
-
-    it("should handle file not found", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
-
-      await expect(getFile({ id: "invalid-file" })).rejects.toThrow("File not found or access denied");
-    });
-  });
-
-  describe("createFile", () => {
-    it("should validate required fields", async () => {
-      const req: CreateFileRequest = {
-        projectId: "",
-        path: "/test.txt",
-        type: "file"
-      };
-
-      await expect(createFile(req)).rejects.toThrow("Project ID, path, and type are required");
-    });
-
-    it("should validate file type", async () => {
-      const req: CreateFileRequest = {
-        projectId: "project-123",
-        path: "/test.txt",
-        type: "invalid" as any
-      };
-
-      await expect(createFile(req)).rejects.toThrow("Type must be 'file' or 'directory'");
-    });
-
-    it("should create file successfully", async () => {
-      mockDb.queryRow
-        .mockResolvedValueOnce({ id: "project-123" }) // project access
-        .mockResolvedValueOnce(null) // file doesn't exist
-        .mockResolvedValueOnce(null) // no parent directory
-        .mockResolvedValueOnce({ id: "file-123" }); // created file
-
-      const req: CreateFileRequest = {
-        projectId: "project-123",
-        path: "/test.txt",
-        type: "file",
-        content: "Hello world"
-      };
-
-      const result = await createFile(req);
-
-      expect(result.id).toBe("file-123");
-      expect(result.name).toBe("test.txt");
-      expect(result.path).toBe("/test.txt");
-      expect(result.content).toBe("Hello world");
-      expect(result.size).toBe(11);
-    });
-
-    it("should handle file already exists", async () => {
-      mockDb.queryRow
-        .mockResolvedValueOnce({ id: "project-123" }) // project access
-        .mockResolvedValueOnce({ id: "existing-file" }); // file exists
-
-      const req: CreateFileRequest = {
-        projectId: "project-123",
-        path: "/test.txt",
-        type: "file"
-      };
-
-      await expect(createFile(req)).rejects.toThrow("File already exists at this path");
-    });
-
-    it("should handle project access denied", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
-
-      const req: CreateFileRequest = {
-        projectId: "invalid-project",
-        path: "/test.txt",
-        type: "file"
-      };
-
-      await expect(createFile(req)).rejects.toThrow("Write access denied to this project");
-    });
-  });
-
-  describe("updateFile", () => {
-    const mockFile = {
-      id: "file-123",
-      project_id: "project-123",
-      name: "test.txt",
-      path: "/test.txt",
-      type: "file",
-      parent_id: null,
-      content: "original content",
-      size: 16,
-      created_at: new Date(),
-      updated_at: new Date(),
-      project_owner_id: "test-user-123"
-    };
-
-    it("should validate file ID", async () => {
-      await expect(updateFile({ id: "", content: "new content" })).rejects.toThrow("Valid file ID is required");
-    });
-
-    it("should validate content is provided", async () => {
-      mockDb.queryRow.mockResolvedValue(mockFile);
-
-      await expect(updateFile({ id: "file-123" } as any)).rejects.toThrow("Content is required for file updates");
-    });
-
-    it("should prevent updating directory content", async () => {
-      const dirFile = { ...mockFile, type: "directory" };
-      mockDb.queryRow.mockResolvedValue(dirFile);
-
-      await expect(updateFile({ 
-        id: "file-123", 
-        content: "new content" 
-      })).rejects.toThrow("Cannot update content of directory");
-    });
-
-    it("should update file successfully", async () => {
-      mockDb.queryRow.mockResolvedValue(mockFile);
-      mockDb.exec.mockResolvedValue(undefined);
-
-      const req: UpdateFileRequest & { id: string } = {
-        id: "file-123",
-        content: "new content"
-      };
-
-      const result = await updateFile(req);
-
-      expect(result.content).toBe("new content");
-      expect(result.size).toBe(11);
-      expect(mockDb.exec).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE files SET content"),
-        "new content",
-        11,
-        "file-123"
+      vi.mocked(require('fs/promises').readdir).mockRejectedValueOnce(
+        new Error('ENOENT: no such file or directory')
       );
+
+      await expect(listFiles(projectId, path)).rejects.toThrow('Directory not found');
     });
 
-    it("should handle file not found", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
+    it('should validate project access', async () => {
+      const projectId = 'other-user-project';
+      const path = 'src';
 
-      await expect(updateFile({ 
-        id: "invalid-file", 
-        content: "new content" 
-      })).rejects.toThrow("File not found or write access denied");
+      // Mock unauthorized access
+      await expect(listFiles(projectId, path)).rejects.toThrow('Access denied');
     });
   });
 
-  describe("deleteFile", () => {
-    it("should validate file ID", async () => {
-      await expect(deleteFile({ id: "" })).rejects.toThrow("Valid file ID is required");
+  describe('readFile', () => {
+    it('should read file content', async () => {
+      const projectId = 'test-project';
+      const filePath = 'src/App.tsx';
+
+      vi.mocked(require('fs/promises').readFile).mockResolvedValueOnce(
+        'import React from "react";\n\nfunction App() {\n  return <div>Hello</div>;\n}\n\nexport default App;'
+      );
+
+      const result = await readFile(projectId, filePath);
+
+      expect(result.content).toContain('import React');
+      expect(result.content).toContain('function App');
+      expect(result.path).toBe(filePath);
     });
 
-    it("should delete file successfully", async () => {
-      const mockFile = {
-        id: "file-123",
-        type: "file"
+    it('should handle binary files', async () => {
+      const projectId = 'test-project';
+      const filePath = 'src/logo.png';
+
+      vi.mocked(require('fs/promises').readFile).mockResolvedValueOnce(
+        Buffer.from('binary-data')
+      );
+
+      const result = await readFile(projectId, filePath);
+
+      expect(result.content).toBe('[Binary file]');
+      expect(result.isBinary).toBe(true);
+    });
+
+    it('should handle non-existent file', async () => {
+      const projectId = 'test-project';
+      const filePath = 'non-existent.txt';
+
+      vi.mocked(require('fs/promises').readFile).mockRejectedValueOnce(
+        new Error('ENOENT: no such file or directory')
+      );
+
+      await expect(readFile(projectId, filePath)).rejects.toThrow('File not found');
+    });
+  });
+
+  describe('writeFile', () => {
+    it('should write file successfully', async () => {
+      const projectId = 'test-project';
+      const request: WriteFileRequest = {
+        path: 'src/NewComponent.tsx',
+        content: 'import React from "react";\n\nfunction NewComponent() {\n  return <div>New</div>;\n}'
       };
 
-      const mockTx = {
-        exec: vi.fn().mockResolvedValue(undefined),
-        commit: vi.fn().mockResolvedValue(undefined),
-        rollback: vi.fn().mockResolvedValue(undefined)
-      };
+      vi.mocked(require('fs/promises').writeFile).mockResolvedValueOnce(undefined);
 
-      mockDb.queryRow.mockResolvedValue(mockFile);
-      mockDb.begin.mockResolvedValue(mockTx);
-
-      const result = await deleteFile({ id: "file-123" });
+      const result = await writeFile(projectId, request);
 
       expect(result.success).toBe(true);
-      expect(mockTx.exec).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE FROM files WHERE id"),
-        "file-123"
+      expect(result.path).toBe(request.path);
+    });
+
+    it('should validate file path', async () => {
+      const projectId = 'test-project';
+      const request: WriteFileRequest = {
+        path: '../../../etc/passwd',
+        content: 'malicious content'
+      };
+
+      await expect(writeFile(projectId, request)).rejects.toThrow('Invalid file path');
+    });
+
+    it('should create directories if needed', async () => {
+      const projectId = 'test-project';
+      const request: WriteFileRequest = {
+        path: 'src/components/NewComponent.tsx',
+        content: 'component content'
+      };
+
+      vi.mocked(require('fs/promises').mkdir).mockResolvedValueOnce(undefined);
+      vi.mocked(require('fs/promises').writeFile).mockResolvedValueOnce(undefined);
+
+      const result = await writeFile(projectId, request);
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('deleteFile', () => {
+    it('should delete file successfully', async () => {
+      const projectId = 'test-project';
+      const filePath = 'src/OldComponent.tsx';
+
+      vi.mocked(require('fs/promises').unlink).mockResolvedValueOnce(undefined);
+
+      const result = await deleteFile(projectId, filePath);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('File deleted successfully');
+    });
+
+    it('should handle non-existent file deletion', async () => {
+      const projectId = 'test-project';
+      const filePath = 'non-existent.txt';
+
+      vi.mocked(require('fs/promises').unlink).mockRejectedValueOnce(
+        new Error('ENOENT: no such file or directory')
       );
-      expect(mockTx.commit).toHaveBeenCalled();
+
+      await expect(deleteFile(projectId, filePath)).rejects.toThrow('File not found');
     });
 
-    it("should handle file not found", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
+    it('should validate file path for deletion', async () => {
+      const projectId = 'test-project';
+      const filePath = '../../../important-file.txt';
 
-      await expect(deleteFile({ id: "invalid-file" })).rejects.toThrow("File not found or write access denied");
+      await expect(deleteFile(projectId, filePath)).rejects.toThrow('Invalid file path');
+    });
+  });
+
+  describe('createDirectory', () => {
+    it('should create directory successfully', async () => {
+      const projectId = 'test-project';
+      const request: CreateDirectoryRequest = {
+        path: 'src/components/ui'
+      };
+
+      vi.mocked(require('fs/promises').mkdir).mockResolvedValueOnce(undefined);
+
+      const result = await createDirectory(projectId, request);
+
+      expect(result.success).toBe(true);
+      expect(result.path).toBe(request.path);
     });
 
-    it("should handle transaction error", async () => {
-      const mockFile = {
-        id: "file-123",
-        type: "file"
+    it('should handle existing directory', async () => {
+      const projectId = 'test-project';
+      const request: CreateDirectoryRequest = {
+        path: 'src/components'
       };
 
-      const mockTx = {
-        exec: vi.fn().mockRejectedValue(new Error("Database error")),
-        rollback: vi.fn().mockResolvedValue(undefined)
+      vi.mocked(require('fs/promises').mkdir).mockRejectedValueOnce(
+        new Error('EEXIST: file already exists')
+      );
+
+      await expect(createDirectory(projectId, request)).rejects.toThrow('Directory already exists');
+    });
+
+    it('should validate directory path', async () => {
+      const projectId = 'test-project';
+      const request: CreateDirectoryRequest = {
+        path: '../../../malicious'
       };
 
-      mockDb.queryRow.mockResolvedValue(mockFile);
-      mockDb.begin.mockResolvedValue(mockTx);
-
-      await expect(deleteFile({ id: "file-123" })).rejects.toThrow("Failed to delete file");
-      expect(mockTx.rollback).toHaveBeenCalled();
+      await expect(createDirectory(projectId, request)).rejects.toThrow('Invalid directory path');
     });
   });
 });

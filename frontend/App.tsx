@@ -5,16 +5,22 @@ import { Toaster } from '@/components/ui/toaster';
 import Dashboard from './components/Dashboard';
 import IDEPage from './pages/IDEPage';
 import ProjectSettings from './pages/ProjectSettings';
+import config from './config';
+import { apiClient } from './src/services/api/client';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: config.queryClient.retryCount,
       refetchOnWindowFocus: false,
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      staleTime: config.queryClient.defaultStaleTime,
+      cacheTime: config.queryClient.defaultCacheTime,
     },
   },
 });
+
+// Configure API client
+apiClient.setBaseUrl(config.apiBaseUrl);
 
 // Simple Auth Context
 const AuthContext = createContext<{

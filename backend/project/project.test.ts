@@ -1,328 +1,238 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { list, create, get, update, remove } from "./project";
-import type { CreateProjectRequest, UpdateProjectRequest } from "./types";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createProject, listProjects, getProject, updateProject, deleteProject } from './project';
+import type { CreateProjectRequest, UpdateProjectRequest } from './types';
 
-// Mock the auth module
-const mockAuth = {
-  userID: "test-user-123",
-  email: "test@example.com",
-  firstName: "Test",
-  lastName: "User",
-  imageUrl: "https://example.com/avatar.jpg"
-};
-
-vi.mock("~encore/auth", () => ({
-  getAuthData: vi.fn(() => mockAuth)
+vi.mock('~encore/auth', () => ({
+  requireUser: vi.fn().mockReturnValue({ id: 'test-user' })
 }));
 
-// Mock the database module
-const mockDb = {
-  queryAll: vi.fn(),
-  queryRow: vi.fn(),
-  exec: vi.fn(),
-  begin: vi.fn(),
-  rawExec: vi.fn(),
-};
-
-vi.mock("../db", () => ({
-  default: mockDb
+vi.mock('encore.dev/storage/sqldb', () => ({
+  SQLDatabase: vi.fn().mockImplementation(() => ({
+    query: vi.fn(),
+    exec: vi.fn()
+  }))
 }));
 
-describe("Project Service", () => {
+vi.mock('nanoid', () => ({
+  nanoid: vi.fn().mockReturnValue('test-project-id')
+}));
+
+describe('Project Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe("list", () => {
-    it("should return projects for authenticated user", async () => {
-      const mockProjects = [
-        {
-          id: "project-1",
-          name: "Test Project 1",
-          description: "A test project",
-          owner_id: "test-user-123",
-          template_type: "react-typescript",
-          repository_url: null,
-          status: "active",
-          visibility: "private",
-          created_at: new Date("2024-01-01"),
-          updated_at: new Date("2024-01-02")
-        }
-      ];
+  describe('createProject', () => {
+    it('should create project successfully', async () => {
+      const request: CreateProjectRequest = {
+        name: 'Test Project',
+        description: 'A test project',
+        template: 'react-typescript'
+      };
 
-      mockDb.exec.mockResolvedValue(undefined); // user upsert
-      mockDb.queryAll.mockResolvedValue(mockProjects);
+      // Mock database response
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockResolvedValueOnce([{
+          id: 'test-project-id',
+          name: 'Test Project',
+          description: 'A test project',
+          template: 'react-typescript',
+          user_id: 'test-user',
+          created_at: new Date(),
+          updated_at: new Date()
+        }]);
 
-      const result = await list();
+      const result = await createProject(request);
 
-      expect(result.projects).toHaveLength(1);
-      expect(result.projects[0].id).toBe("project-1");
-      expect(result.projects[0].name).toBe("Test Project 1");
-      expect(result.projects[0].templateName).toBe("React TypeScript");
-      expect(result.projects[0].isOwner).toBe(true);
+      expect(result).toHaveProperty('id');
+      expect(result).toHaveProperty('name');
+      expect(result).toHaveProperty('template');
+      expect(result.name).toBe(request.name);
+      expect(result.template).toBe(request.template);
     });
 
-    it("should handle empty project list", async () => {
-      mockDb.exec.mockResolvedValue(undefined);
-      mockDb.queryAll.mockResolvedValue([]);
+    it('should validate project name', async () => {
+      const request: CreateProjectRequest = {
+        name: '',
+        template: 'react-typescript'
+      };
 
-      const result = await list();
+      await expect(createProject(request)).rejects.toThrow('Project name is required');
+    });
 
+    it('should validate template', async () => {
+      const request: CreateProjectRequest = {
+        name: 'Test Project',
+        template: 'invalid-template' as any
+      };
+
+      await expect(createProject(request)).rejects.toThrow('Invalid template');
+    });
+
+    it('should handle duplicate project name', async () => {
+      const request: CreateProjectRequest = {
+        name: 'Existing Project',
+        template: 'react-typescript'
+      };
+
+      // Mock database to simulate existing project
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockRejectedValueOnce(new Error('duplicate key value'));
+
+      await expect(createProject(request)).rejects.toThrow('Project name already exists');
+    });
+  });
+
+  describe('listProjects', () => {
+    it('should list user projects', async () => {
+      // Mock database response
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockResolvedValueOnce([
+          {
+            id: 'project-1',
+            name: 'Project 1',
+            description: 'First project',
+            template: 'react-typescript',
+            user_id: 'test-user',
+            created_at: new Date(),
+            updated_at: new Date()
+          },
+          {
+            id: 'project-2',
+            name: 'Project 2',
+            description: 'Second project',
+            template: 'express-typescript',
+            user_id: 'test-user',
+            created_at: new Date(),
+            updated_at: new Date()
+          }
+        ]);
+
+      const result = await listProjects();
+
+      expect(Array.isArray(result.projects)).toBe(true);
+      expect(result.projects).toHaveLength(2);
+      expect(result.projects[0].name).toBe('Project 1');
+      expect(result.projects[1].name).toBe('Project 2');
+    });
+
+    it('should return empty list for user with no projects', async () => {
+      // Mock database to return no projects
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockResolvedValueOnce([]);
+
+      const result = await listProjects();
+
+      expect(Array.isArray(result.projects)).toBe(true);
       expect(result.projects).toHaveLength(0);
     });
   });
 
-  describe("create", () => {
-    it("should validate required name", async () => {
-      const req: CreateProjectRequest = {
-        name: "",
-        description: "Test project"
-      };
+  describe('getProject', () => {
+    it('should get project by id', async () => {
+      const projectId = 'test-project-id';
 
-      await expect(create(req)).rejects.toThrow("Project name is required");
+      // Mock database response
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockResolvedValueOnce([{
+          id: projectId,
+          name: 'Test Project',
+          description: 'A test project',
+          template: 'react-typescript',
+          user_id: 'test-user',
+          created_at: new Date(),
+          updated_at: new Date()
+        }]);
+
+      const result = await getProject(projectId);
+
+      expect(result.id).toBe(projectId);
+      expect(result.name).toBe('Test Project');
     });
 
-    it("should validate name length", async () => {
-      const req: CreateProjectRequest = {
-        name: "a".repeat(101),
-        description: "Test project"
-      };
+    it('should handle project not found', async () => {
+      const projectId = 'non-existent';
 
-      await expect(create(req)).rejects.toThrow("Project name too long");
+      // Mock database to return no project
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockResolvedValueOnce([]);
+
+      await expect(getProject(projectId)).rejects.toThrow('Project not found');
     });
 
-    it("should validate description length", async () => {
-      const req: CreateProjectRequest = {
-        name: "Test Project",
-        description: "a".repeat(501)
-      };
+    it('should handle unauthorized access', async () => {
+      const projectId = 'other-user-project';
 
-      await expect(create(req)).rejects.toThrow("Project description too long");
-    });
+      // Mock database to return project owned by different user
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockResolvedValueOnce([{
+          id: projectId,
+          name: 'Other Project',
+          user_id: 'other-user'
+        }]);
 
-    it("should create project successfully", async () => {
-      const req: CreateProjectRequest = {
-        name: "Test Project",
-        description: "A test project",
-        template: "react-typescript",
-        visibility: "private"
-      };
-
-      mockDb.exec.mockResolvedValue(undefined); // user upsert
-      mockDb.queryRow.mockResolvedValue({ id: "project-123" });
-
-      const result = await create(req);
-
-      expect(result.id).toBe("project-123");
-      expect(result.name).toBe("Test Project");
-      expect(result.description).toBe("A test project");
-      expect(result.template).toBe("react-typescript");
-      expect(result.visibility).toBe("private");
-      expect(result.isOwner).toBe(true);
-      
-      // Verify database calls
-      expect(mockDb.queryRow).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO projects"),
-        "Test Project",
-        "A test project",
-        "test-user-123",
-        "react-typescript",
-        "active",
-        "private"
-      );
-    });
-
-    it("should use default values", async () => {
-      const req: CreateProjectRequest = {
-        name: "Test Project"
-      };
-
-      mockDb.exec.mockResolvedValue(undefined);
-      mockDb.queryRow.mockResolvedValue({ id: "project-123" });
-
-      const result = await create(req);
-
-      expect(result.template).toBe("react-typescript");
-      expect(result.visibility).toBe("private");
-    });
-
-    it("should handle database error", async () => {
-      const req: CreateProjectRequest = {
-        name: "Test Project"
-      };
-
-      mockDb.exec.mockResolvedValue(undefined);
-      mockDb.queryRow.mockResolvedValue(null);
-
-      await expect(create(req)).rejects.toThrow("Failed to create project");
+      await expect(getProject(projectId)).rejects.toThrow('Project not found');
     });
   });
 
-  describe("get", () => {
-    it("should validate project ID", async () => {
-      await expect(get({ id: "" })).rejects.toThrow("Valid project ID is required");
-    });
-
-    it("should return project details", async () => {
-      const mockProject = {
-        id: "project-123",
-        name: "Test Project",
-        description: "A test project",
-        owner_id: "test-user-123",
-        template_type: "react-typescript",
-        repository_url: "https://github.com/user/repo",
-        status: "active",
-        visibility: "private",
-        created_at: new Date("2024-01-01"),
-        updated_at: new Date("2024-01-02")
+  describe('updateProject', () => {
+    it('should update project successfully', async () => {
+      const projectId = 'test-project-id';
+      const request: UpdateProjectRequest = {
+        name: 'Updated Project',
+        description: 'Updated description'
       };
 
-      mockDb.queryRow.mockResolvedValue(mockProject);
+      // Mock database response
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
+        .mockResolvedValueOnce([{
+          id: projectId,
+          name: 'Updated Project',
+          description: 'Updated description',
+          template: 'react-typescript',
+          user_id: 'test-user',
+          created_at: new Date(),
+          updated_at: new Date()
+        }]);
 
-      const result = await get({ id: "project-123" });
+      const result = await updateProject(projectId, request);
 
-      expect(result.id).toBe("project-123");
-      expect(result.name).toBe("Test Project");
-      expect(result.repositoryUrl).toBe("https://github.com/user/repo");
-      expect(result.isOwner).toBe(true);
+      expect(result.name).toBe(request.name);
+      expect(result.description).toBe(request.description);
     });
 
-    it("should handle project not found", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
+    it('should validate update data', async () => {
+      const projectId = 'test-project-id';
+      const request: UpdateProjectRequest = {
+        name: ''
+      };
 
-      await expect(get({ id: "invalid-project" })).rejects.toThrow("Project not found or access denied");
+      await expect(updateProject(projectId, request)).rejects.toThrow('Project name cannot be empty');
     });
   });
 
-  describe("update", () => {
-    const mockProject = {
-      id: "project-123",
-      name: "Test Project",
-      description: "A test project",
-      owner_id: "test-user-123",
-      template_type: "react-typescript",
-      repository_url: null,
-      status: "active",
-      visibility: "private",
-      created_at: new Date("2024-01-01"),
-      updated_at: new Date("2024-01-02")
-    };
+  describe('deleteProject', () => {
+    it('should delete project successfully', async () => {
+      const projectId = 'test-project-id';
 
-    it("should validate project ID", async () => {
-      await expect(update({ id: "", name: "New Name" })).rejects.toThrow("Valid project ID is required");
-    });
+      // Mock database to confirm deletion
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().exec)
+        .mockResolvedValueOnce(undefined);
 
-    it("should validate name when provided", async () => {
-      mockDb.queryRow.mockResolvedValue(mockProject);
-
-      await expect(update({ id: "project-123", name: "" })).rejects.toThrow("Project name cannot be empty");
-    });
-
-    it("should validate description length", async () => {
-      mockDb.queryRow.mockResolvedValue(mockProject);
-
-      await expect(update({ 
-        id: "project-123", 
-        description: "a".repeat(501) 
-      })).rejects.toThrow("Project description too long");
-    });
-
-    it("should restrict visibility changes to owner", async () => {
-      const nonOwnerProject = { ...mockProject, owner_id: "other-user" };
-      mockDb.queryRow.mockResolvedValue(nonOwnerProject);
-
-      await expect(update({ 
-        id: "project-123", 
-        visibility: "public" 
-      })).rejects.toThrow("Only project owner can change visibility");
-    });
-
-    it("should update project successfully", async () => {
-      mockDb.queryRow
-        .mockResolvedValueOnce(mockProject) // access check
-        .mockResolvedValueOnce({ ...mockProject, name: "Updated Project" }); // updated project
-      
-      mockDb.rawExec.mockResolvedValue(undefined);
-
-      const req: UpdateProjectRequest & { id: string } = {
-        id: "project-123",
-        name: "Updated Project",
-        description: "Updated description"
-      };
-
-      const result = await update(req);
-
-      expect(result.name).toBe("Updated Project");
-      expect(mockDb.rawExec).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE projects SET"),
-        "project-123",
-        "Updated Project",
-        "Updated description"
-      );
-    });
-
-    it("should handle project not found", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
-
-      await expect(update({ 
-        id: "invalid-project", 
-        name: "New Name" 
-      })).rejects.toThrow("Project not found or edit access denied");
-    });
-  });
-
-  describe("remove", () => {
-    it("should validate project ID", async () => {
-      await expect(remove({ id: "" })).rejects.toThrow("Valid project ID is required");
-    });
-
-    it("should delete project successfully", async () => {
-      const mockProject = {
-        id: "project-123",
-        owner_id: "test-user-123"
-      };
-
-      const mockTx = {
-        exec: vi.fn().mockResolvedValue(undefined),
-        commit: vi.fn().mockResolvedValue(undefined),
-        rollback: vi.fn().mockResolvedValue(undefined)
-      };
-
-      mockDb.queryRow.mockResolvedValue(mockProject);
-      mockDb.begin.mockResolvedValue(mockTx);
-
-      const result = await remove({ id: "project-123" });
+      const result = await deleteProject(projectId);
 
       expect(result.success).toBe(true);
-      expect(mockTx.exec).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE projects SET status = 'deleted'"),
-        "project-123"
-      );
-      expect(mockTx.commit).toHaveBeenCalled();
+      expect(result.message).toBe('Project deleted successfully');
     });
 
-    it("should handle unauthorized deletion", async () => {
-      mockDb.queryRow.mockResolvedValue(null);
+    it('should handle project not found during deletion', async () => {
+      const projectId = 'non-existent';
 
-      await expect(remove({ id: "project-123" })).rejects.toThrow("Project not found or not authorized to delete");
-    });
+      // Mock database to simulate no rows affected
+      vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().exec)
+        .mockRejectedValueOnce(new Error('Project not found'));
 
-    it("should handle transaction error", async () => {
-      const mockProject = {
-        id: "project-123",
-        owner_id: "test-user-123"
-      };
-
-      const mockTx = {
-        exec: vi.fn().mockRejectedValue(new Error("Database error")),
-        rollback: vi.fn().mockResolvedValue(undefined)
-      };
-
-      mockDb.queryRow.mockResolvedValue(mockProject);
-      mockDb.begin.mockResolvedValue(mockTx);
-
-      await expect(remove({ id: "project-123" })).rejects.toThrow("Failed to delete project");
-      expect(mockTx.rollback).toHaveBeenCalled();
+      await expect(deleteProject(projectId)).rejects.toThrow('Project not found');
     });
   });
 });

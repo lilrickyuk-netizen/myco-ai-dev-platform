@@ -1,4 +1,4 @@
-import { trackRequest } from "./metrics";
+import { recordHttpRequest, recordError } from "./metrics";
 import log from "encore.dev/log";
 
 // Simple middleware interface for request tracking
@@ -22,7 +22,7 @@ export function endRequestTracking(metrics: RequestMetrics, statusCode: number):
   const responseTime = Date.now() - metrics.startTime;
   
   try {
-    trackRequest(metrics.endpoint, metrics.method, statusCode, responseTime);
+    recordHttpRequest(metrics.method, metrics.endpoint, statusCode, responseTime);
   } catch (error) {
     log.error('Failed to track request metrics', error);
   }
@@ -48,8 +48,16 @@ export function withMetrics<T extends (...args: any[]) => Promise<any>>(
         else if (error.message.includes('unauthorized')) statusCode = 401;
         else if (error.message.includes('forbidden')) statusCode = 403;
         else statusCode = 500;
+        
+        // Record error metrics
+        recordError(
+          'backend',
+          error.name || 'UnknownError',
+          statusCode >= 500 ? 'high' : 'medium'
+        );
       } else {
         statusCode = 500;
+        recordError('backend', 'UnknownError', 'high');
       }
       throw error;
     } finally {

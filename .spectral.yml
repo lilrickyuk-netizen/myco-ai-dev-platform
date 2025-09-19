@@ -1,0 +1,127 @@
+extends: ["@stoplight/spectral-oai"]
+
+rules:
+  # OpenAPI 3.x specific rules
+  openapi-tags: true
+  operation-description: true
+  operation-operationId: true
+  operation-summary: true
+  operation-tags: true
+  path-params: true
+  contact-properties: true
+  info-contact: true
+  info-description: true
+  license-url: true
+  no-eval-in-markdown: true
+  no-script-tags-in-markdown: true
+  openapi-tags-alphabetical: false
+  operation-operationId-unique: true
+  operation-operationId-valid-in-url: true
+  operation-parameters: true
+  operation-success-response: true
+  operation-tag-defined: true
+  path-declarations-must-exist: true
+  path-keys-no-trailing-slash: true
+  path-not-include-query: true
+  tag-description: true
+  typed-enum: true
+  oas3-api-servers: true
+  oas3-examples-value-or-externalValue: true
+  oas3-operation-security-defined: true
+  oas3-parameter-description: true
+  oas3-schema: true
+  oas3-server-not-example.com: true
+  oas3-server-trailing-slash: true
+  oas3-valid-media-example: true
+  oas3-valid-schema-example: true
+
+  # Custom rules for our API
+  myco-operation-description-length:
+    description: Operation descriptions should be comprehensive
+    given: "$.paths[*][*]"
+    then:
+      field: description
+      function: length
+      functionOptions:
+        min: 10
+        max: 500
+
+  myco-schema-properties-description:
+    description: Schema properties should have descriptions
+    given: "$.components.schemas[*].properties[*]"
+    then:
+      field: description
+      function: truthy
+
+  myco-error-responses:
+    description: Operations should define error responses
+    given: "$.paths[*][*].responses"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          anyOf:
+            - required: ["400"]
+            - required: ["401"] 
+            - required: ["403"]
+            - required: ["404"]
+            - required: ["500"]
+
+  myco-security-defined:
+    description: Operations should have security requirements
+    given: "$.paths[*][*]"
+    then:
+      field: security
+      function: defined
+
+  myco-response-examples:
+    description: Responses should include examples
+    given: "$.paths[*][*].responses[*].content[*]"
+    then:
+      field: examples
+      function: defined
+    severity: warn
+
+  myco-parameter-examples:
+    description: Parameters should include examples where appropriate
+    given: "$.paths[*][*].parameters[*]"
+    then:
+      field: example
+      function: defined
+    severity: warn
+
+  myco-consistent-error-schema:
+    description: Error responses should use consistent schema
+    given: "$.paths[*][*].responses[4*].content.application/json.schema"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          properties:
+            $ref:
+              const: "#/components/schemas/ErrorResponse"
+
+  myco-version-in-url:
+    description: API paths should include version
+    given: "$.paths[*]~"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^/api/v\\d+"
+    severity: warn
+
+  myco-required-headers:
+    description: Ensure content-type is specified for POST/PUT operations
+    given: "$.paths[*][post,put].requestBody.content"
+    then:
+      field: "application/json"
+      function: defined
+
+# Disable some default rules that don't fit our API design
+rules:
+  # We use bearer tokens, not API keys in query params
+  no-credentials-in-url: false
+  
+  # We allow some flexibility in operation IDs
+  operation-operationId-unique: warn

@@ -1,0 +1,194 @@
+groups:
+  - name: myco-slo-alerts
+    rules:
+      # Availability SLO Alerts
+      - alert: BackendAvailabilitySLOBreach
+        expr: (1 - (rate(myco_backend_http_requests_total{status_code=~"5.."}[30m]) / rate(myco_backend_http_requests_total[30m]))) * 100 < 99.5
+        for: 5m
+        labels:
+          severity: critical
+          service: backend
+          slo_type: availability
+        annotations:
+          summary: "Backend availability SLO breach"
+          description: "Backend availability ({{ $value }}%) is below the 99.5% SLO threshold for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/availability-slo-breach"
+
+      - alert: AIEngineAvailabilitySLOBreach
+        expr: (1 - (rate(myco_ai_engine_http_requests_total{status_code=~"5.."}[30m]) / rate(myco_ai_engine_http_requests_total[30m]))) * 100 < 99.5
+        for: 5m
+        labels:
+          severity: critical
+          service: ai-engine
+          slo_type: availability
+        annotations:
+          summary: "AI Engine availability SLO breach"
+          description: "AI Engine availability ({{ $value }}%) is below the 99.5% SLO threshold for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/availability-slo-breach"
+
+      # Latency SLO Alerts
+      - alert: BackendLatencySLOBreach
+        expr: histogram_quantile(0.95, rate(myco_backend_http_request_duration_seconds_bucket[30m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+          slo_type: latency
+        annotations:
+          summary: "Backend latency SLO breach"
+          description: "Backend P95 latency ({{ $value }}s) is above the 2s SLO threshold for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/latency-slo-breach"
+
+      - alert: AIEngineLatencySLOBreach
+        expr: histogram_quantile(0.95, rate(myco_ai_engine_http_request_duration_seconds_bucket[30m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-engine
+          slo_type: latency
+        annotations:
+          summary: "AI Engine latency SLO breach"
+          description: "AI Engine P95 latency ({{ $value }}s) is above the 10s SLO threshold for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/latency-slo-breach"
+
+      # LLM Latency SLO Alert
+      - alert: LLMLatencySLOBreach
+        expr: histogram_quantile(0.95, rate(myco_ai_engine_llm_request_duration_seconds_bucket[30m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-engine
+          slo_type: llm_latency
+        annotations:
+          summary: "LLM latency SLO breach"
+          description: "LLM P95 latency ({{ $value }}s) is above the 30s SLO threshold for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/llm-latency-slo-breach"
+
+      # Error Rate SLO Alerts
+      - alert: BackendErrorRateSLOBreach
+        expr: rate(myco_backend_http_requests_total{status_code=~"5.."}[30m]) / rate(myco_backend_http_requests_total[30m]) * 100 > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          service: backend
+          slo_type: error_rate
+        annotations:
+          summary: "Backend error rate SLO breach"
+          description: "Backend error rate ({{ $value }}%) is above the 0.5% SLO threshold for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/error-rate-slo-breach"
+
+      - alert: AIEngineErrorRateSLOBreach
+        expr: rate(myco_ai_engine_http_requests_total{status_code=~"5.."}[30m]) / rate(myco_ai_engine_http_requests_total[30m]) * 100 > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          service: ai-engine
+          slo_type: error_rate
+        annotations:
+          summary: "AI Engine error rate SLO breach"
+          description: "AI Engine error rate ({{ $value }}%) is above the 0.5% SLO threshold for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/error-rate-slo-breach"
+
+      # Throughput SLO Alerts
+      - alert: BackendThroughputSLOBreach
+        expr: rate(myco_backend_http_requests_total[30m]) < 100
+        for: 10m
+        labels:
+          severity: warning
+          service: backend
+          slo_type: throughput
+        annotations:
+          summary: "Backend throughput SLO breach"
+          description: "Backend throughput ({{ $value }} rps) is below the 100 rps SLO threshold for 10 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/throughput-slo-breach"
+
+      # LLM Error Rate Alert
+      - alert: LLMErrorRateHigh
+        expr: rate(myco_ai_engine_llm_requests_total{status="error"}[30m]) / rate(myco_ai_engine_llm_requests_total[30m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-engine
+          slo_type: llm_error_rate
+        annotations:
+          summary: "LLM error rate high"
+          description: "LLM error rate ({{ $value }}%) is above 5% for 5 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/llm-error-rate-high"
+
+      # Service Health Alerts
+      - alert: ServiceUnhealthy
+        expr: myco_backend_service_health == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: "{{ $labels.service }}"
+        annotations:
+          summary: "Service {{ $labels.service }} is unhealthy"
+          description: "Service {{ $labels.service }} has been unhealthy for 2 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/service-unhealthy"
+
+      - alert: DependencyUnhealthy
+        expr: myco_backend_dependency_health == 0
+        for: 2m
+        labels:
+          severity: critical
+          dependency: "{{ $labels.dependency }}"
+        annotations:
+          summary: "Dependency {{ $labels.dependency }} is unhealthy"
+          description: "Dependency {{ $labels.dependency }} has been unhealthy for 2 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/dependency-unhealthy"
+
+      # Budget Burn Rate Alerts (Error Budget)
+      - alert: ErrorBudgetBurnRateHigh
+        expr: |
+          (
+            1 - (
+              (1 - rate(myco_backend_http_requests_total{status_code=~"5.."}[1h]) / rate(myco_backend_http_requests_total[1h])) /
+              0.995
+            )
+          ) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+          slo_type: error_budget
+        annotations:
+          summary: "High error budget burn rate for backend"
+          description: "Backend is burning through error budget at {{ $value }}% per hour"
+          runbook_url: "https://docs.myco.ai/runbooks/error-budget-burn-rate"
+
+      # Cost Alerts
+      - alert: LLMCostHigh
+        expr: increase(myco_ai_engine_llm_cost_total[1h]) > 100
+        for: 1m
+        labels:
+          severity: warning
+          service: ai-engine
+          cost_type: llm
+        annotations:
+          summary: "LLM costs are high"
+          description: "LLM costs have increased by ${{ $value }} in the last hour"
+          runbook_url: "https://docs.myco.ai/runbooks/llm-cost-high"
+
+      # Provider Health Alerts
+      - alert: LLMProviderUnhealthy
+        expr: myco_ai_engine_provider_health == 0
+        for: 2m
+        labels:
+          severity: warning
+          provider: "{{ $labels.provider }}"
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} is unhealthy"
+          description: "LLM provider {{ $labels.provider }} has been unhealthy for 2 minutes"
+          runbook_url: "https://docs.myco.ai/runbooks/llm-provider-unhealthy"
+
+      - alert: LLMProviderRateLimitLow
+        expr: myco_ai_engine_provider_rate_limit_remaining < 100
+        for: 1m
+        labels:
+          severity: warning
+          provider: "{{ $labels.provider }}"
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} rate limit low"
+          description: "LLM provider {{ $labels.provider }} has only {{ $value }} requests remaining"
+          runbook_url: "https://docs.myco.ai/runbooks/llm-rate-limit-low"
