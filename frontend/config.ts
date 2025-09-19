@@ -1,12 +1,10 @@
 // Clerk publishable key for authentication
 // Get this from your Clerk dashboard at https://clerk.com
-export const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_c3RpcnJpbmctcGVyY2gtMTUuY2xlcmsuYWNjb3VudHMuZGV2JA";
+export const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || "pk_test_c3RpcnJpbmctcGVyY2gtMTUuY2xlcmsuYWNjb3VudHMuZGV2JA";
 
 // API configuration
 export const apiConfig = {
-  baseUrl: process.env.NODE_ENV === 'production' 
-    ? 'https://myco-ai-dev-platform-d32ldfc82vjkjrpel8hg.lp.dev'
-    : 'http://localhost:3000',
+  baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:4000',
   timeout: 30000,
 };
 

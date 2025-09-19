@@ -26,7 +26,7 @@ const AUTHORIZED_PARTIES = [
   "localhost:5173"
 ];
 
-const auth = authHandler<AuthParams, AuthData>(
+export const auth = authHandler<AuthParams, AuthData>(
   async (data) => {
     // Resolve the authenticated user from the authorization header or session cookie.
     const token = data.authorization?.replace("Bearer ", "") ?? data.session?.value;
@@ -49,7 +49,7 @@ const auth = authHandler<AuthParams, AuthData>(
         lastName: user.lastName,
       };
     } catch (err) {
-      throw APIError.unauthenticated("invalid token", err);
+      throw APIError.unauthenticated("invalid token", err as Error);
     }
   }
 );

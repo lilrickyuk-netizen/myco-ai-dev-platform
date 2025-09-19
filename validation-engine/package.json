@@ -1,5 +1,5 @@
 {
-  "name": "validation-engine",
+  "name": "@myco/validation-engine",
   "version": "1.0.0",
   "description": "Code quality and security validation engine for MYCO platform",
   "main": "dist/index.js",
