@@ -1,0 +1,666 @@
+# Prometheus Configuration for AI Development Platform
+# Comprehensive monitoring setup with custom metrics and alerting
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      scrape_timeout: 10s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: 'ai-dev-platform'
+        environment: 'production'
+        region: 'us-west-2'
+
+    # Alertmanager configuration
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+              - alertmanager:9093
+          scheme: http
+          timeout: 10s
+          api_version: v2
+
+    # Load rules once and periodically evaluate them
+    rule_files:
+      - "alert_rules.yml"
+      - "recording_rules.yml"
+
+    # Scrape configuration
+    scrape_configs:
+      # Prometheus itself
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+        scrape_interval: 5s
+        metrics_path: /metrics
+
+      # Kubernetes API server
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - default
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: false
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      # Kubernetes nodes
+      - job_name: 'kubernetes-nodes'
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: false
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics
+
+      # Kubernetes node exporter
+      - job_name: 'kubernetes-nodes-cadvisor'
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: false
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+
+      # Kubernetes service endpoints
+      - job_name: 'kubernetes-service-endpoints'
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+            action: replace
+            target_label: __scheme__
+            regex: (https?)
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - action: labelmap
+            regex: __meta_kubernetes_service_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_service_name]
+            action: replace
+            target_label: kubernetes_name
+
+      # AI Development Platform - Frontend
+      - job_name: 'ai-platform-frontend'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - myco-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: frontend
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+        scrape_interval: 30s
+
+      # AI Development Platform - Backend
+      - job_name: 'ai-platform-backend'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - myco-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: backend
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+        scrape_interval: 15s
+
+      # AI Development Platform - AI Engine
+      - job_name: 'ai-platform-ai-engine'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - myco-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: ai-engine
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+        scrape_interval: 10s
+
+      # AI Development Platform - Execution Engine
+      - job_name: 'ai-platform-execution-engine'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - myco-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: execution-engine
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+        scrape_interval: 15s
+
+      # PostgreSQL Exporter
+      - job_name: 'postgres-exporter'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - myco-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: postgres
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: metrics
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+        scrape_interval: 30s
+
+      # Redis Exporter
+      - job_name: 'redis-exporter'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - myco-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: redis
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: metrics
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+        scrape_interval: 30s
+
+      # NGINX Ingress Controller
+      - job_name: 'nginx-ingress'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - ingress-nginx
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            action: keep
+            regex: ingress-nginx
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            action: keep
+            regex: "10254"
+        scrape_interval: 30s
+
+      # Kubernetes State Metrics
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics:8080']
+        scrape_interval: 30s
+
+      # Node Exporter
+      - job_name: 'node-exporter'
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - monitoring
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: node-exporter
+        scrape_interval: 30s
+
+      # Blackbox Exporter for endpoint monitoring
+      - job_name: 'blackbox-http'
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        static_configs:
+          - targets:
+            - https://ai-dev-platform.example.com
+            - https://api.ai-dev-platform.example.com/health
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter:9115
+        scrape_interval: 60s
+
+      # Custom Application Metrics
+      - job_name: 'custom-metrics'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - myco-platform
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape_custom]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+        scrape_interval: 15s
+
+    # Remote write configuration for long-term storage
+    remote_write:
+      - url: "https://prometheus-remote-write.monitoring.svc.cluster.local/api/v1/write"
+        basic_auth:
+          username: prometheus
+          password_file: /etc/prometheus/secrets/remote-write-password
+        write_relabel_configs:
+          - source_labels: [__name__]
+            regex: "prometheus_.*|go_.*|process_.*"
+            action: drop
+        queue_config:
+          capacity: 10000
+          max_shards: 200
+          min_shards: 1
+          max_samples_per_send: 1000
+          batch_send_deadline: 5s
+          min_backoff: 30ms
+          max_backoff: 100ms
+
+  # Alert rules for critical system monitoring
+  alert_rules.yml: |
+    groups:
+      - name: ai-platform.rules
+        rules:
+          # High CPU usage
+          - alert: HighCPUUsage
+            expr: (100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+            for: 5m
+            labels:
+              severity: warning
+              service: infrastructure
+            annotations:
+              summary: "High CPU usage detected"
+              description: "CPU usage is above 80% for {{ $labels.instance }}"
+
+          # High memory usage
+          - alert: HighMemoryUsage
+            expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+            for: 5m
+            labels:
+              severity: warning
+              service: infrastructure
+            annotations:
+              summary: "High memory usage detected"
+              description: "Memory usage is above 85% for {{ $labels.instance }}"
+
+          # Disk space warning
+          - alert: DiskSpaceWarning
+            expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100 < 20
+            for: 10m
+            labels:
+              severity: warning
+              service: infrastructure
+            annotations:
+              summary: "Low disk space warning"
+              description: "Disk space is below 20% for {{ $labels.instance }}"
+
+          # Pod crash loop
+          - alert: PodCrashLooping
+            expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+            for: 5m
+            labels:
+              severity: critical
+              service: kubernetes
+            annotations:
+              summary: "Pod is crash looping"
+              description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping"
+
+          # Application error rate
+          - alert: HighErrorRate
+            expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.1
+            for: 5m
+            labels:
+              severity: critical
+              service: application
+            annotations:
+              summary: "High error rate detected"
+              description: "Error rate is above 10% for {{ $labels.job }}"
+
+          # AI Engine response time
+          - alert: AIEngineSlowResponse
+            expr: histogram_quantile(0.95, rate(ai_request_duration_seconds_bucket[5m])) > 10
+            for: 5m
+            labels:
+              severity: warning
+              service: ai-engine
+            annotations:
+              summary: "AI Engine slow response"
+              description: "95th percentile response time is above 10 seconds"
+
+          # Database connection issues
+          - alert: DatabaseConnectionHigh
+            expr: postgres_stat_activity_count > 80
+            for: 5m
+            labels:
+              severity: warning
+              service: database
+            annotations:
+              summary: "High database connections"
+              description: "Database has more than 80 active connections"
+
+          # Redis memory usage
+          - alert: RedisHighMemory
+            expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+            for: 5m
+            labels:
+              severity: critical
+              service: redis
+            annotations:
+              summary: "Redis memory usage critical"
+              description: "Redis memory usage is above 90%"
+
+  # Recording rules for performance optimization
+  recording_rules.yml: |
+    groups:
+      - name: ai-platform.recording
+        interval: 30s
+        rules:
+          # Application-level recording rules
+          - record: ai_platform:request_rate_5m
+            expr: rate(http_requests_total[5m])
+
+          - record: ai_platform:error_rate_5m
+            expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+
+          - record: ai_platform:response_time_95p_5m
+            expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+
+          # AI Engine specific metrics
+          - record: ai_engine:completion_rate_5m
+            expr: rate(ai_completions_total[5m])
+
+          - record: ai_engine:token_usage_5m
+            expr: rate(ai_tokens_used_total[5m])
+
+          - record: ai_engine:model_latency_95p_5m
+            expr: histogram_quantile(0.95, rate(ai_model_request_duration_seconds_bucket[5m]))
+
+          # Infrastructure metrics
+          - record: node:cpu_utilization
+            expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+          - record: node:memory_utilization
+            expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100
+
+          - record: node:disk_utilization
+            expr: (node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes * 100
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      serviceAccountName: prometheus
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v2.47.0
+        args:
+          - '--config.file=/etc/prometheus/prometheus.yml'
+          - '--storage.tsdb.path=/prometheus/'
+          - '--web.console.libraries=/etc/prometheus/console_libraries'
+          - '--web.console.templates=/etc/prometheus/consoles'
+          - '--storage.tsdb.retention.time=30d'
+          - '--storage.tsdb.retention.size=50GB'
+          - '--web.enable-lifecycle'
+          - '--web.enable-admin-api'
+          - '--query.max-concurrency=20'
+          - '--query.timeout=2m'
+        ports:
+        - containerPort: 9090
+          name: web
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus
+        - name: storage
+          mountPath: /prometheus
+        - name: secrets
+          mountPath: /etc/prometheus/secrets
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 500m
+          limits:
+            memory: 8Gi
+            cpu: 2000m
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9090
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 4
+          failureThreshold: 3
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config
+      - name: storage
+        persistentVolumeClaim:
+          claimName: prometheus-storage
+      - name: secrets
+        secret:
+          secretName: prometheus-secrets
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - amd64
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9090
+    targetPort: 9090
+    name: web
+  selector:
+    app: prometheus
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/proxy
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - extensions
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: monitoring

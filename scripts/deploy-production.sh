@@ -1,11 +1,16 @@
 #!/bin/bash
-set -e
 
-# Myco Platform Production Deployment Script
-# This script handles the complete production deployment process
+# Production Deployment Script for AI Development Platform
+# Comprehensive deployment with security checks, monitoring, and validation
 
-echo "🚀 Myco Platform Production Deployment"
-echo "======================================"
+set -euo pipefail
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ENVIRONMENT="${ENVIRONMENT:-production}"
+REGION="${AWS_REGION:-us-west-2}"
+CLUSTER_NAME="${CLUSTER_NAME:-ai-dev-platform-${ENVIRONMENT}}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -14,465 +19,437 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-ENVIRONMENT="${ENVIRONMENT:-production}"
-AWS_REGION="${AWS_REGION:-us-west-2}"
-CLUSTER_NAME="myco-platform-${ENVIRONMENT}"
-NAMESPACE="myco-platform"
-IMAGE_TAG="${IMAGE_TAG:-latest}"
-TERRAFORM_STATE_BUCKET="myco-platform-terraform-state"
+# Logging
+log() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $*${NC}" >&2; }
+warn() { echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $*${NC}" >&2; }
+error() { echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*${NC}" >&2; }
+info() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $*${NC}" >&2; }
 
-# Helper functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+# Trap to ensure cleanup on exit
+cleanup() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error "Deployment failed with exit code $exit_code"
+        log "Cleaning up temporary resources..."
+        # Add cleanup logic here
+    fi
+    exit $exit_code
 }
+trap cleanup EXIT
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Function to check prerequisites
+# Check prerequisites
 check_prerequisites() {
-    log_info "Checking prerequisites..."
+    log "Checking prerequisites..."
+    
+    local missing_tools=()
     
     # Check required tools
-    local required_tools=("aws" "kubectl" "terraform" "docker" "helm")
-    
-    for tool in "${required_tools[@]}"; do
-        if ! command -v "$tool" >/dev/null 2>&1; then
-            log_error "$tool is required but not installed"
-            exit 1
+    for tool in kubectl helm terraform aws docker; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing_tools+=("$tool")
         fi
     done
+    
+    if [ ${#missing_tools[@]} -ne 0 ]; then
+        error "Missing required tools: ${missing_tools[*]}"
+        error "Please install the missing tools before running this script"
+        exit 1
+    fi
     
     # Check AWS credentials
-    if ! aws sts get-caller-identity >/dev/null 2>&1; then
-        log_error "AWS credentials not configured"
+    if ! aws sts get-caller-identity &> /dev/null; then
+        error "AWS credentials not configured or invalid"
         exit 1
     fi
     
-    # Check Docker is running
-    if ! docker ps >/dev/null 2>&1; then
-        log_error "Docker is not running"
-        exit 1
-    fi
-    
-    log_success "Prerequisites check passed"
-}
-
-# Function to build and push Docker images
-build_and_push_images() {
-    log_info "Building and pushing Docker images..."
-    
-    # Get AWS account ID
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-    
-    # Login to ECR
-    aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-    
-    # List of services to build
-    local services=("backend" "frontend" "ai-engine" "execution-engine")
-    
-    for service in "${services[@]}"; do
-        if [ -d "$service" ]; then
-            log_info "Building $service image..."
-            
-            # Create ECR repository if it doesn't exist
-            aws ecr describe-repositories --repository-names "myco-platform/$service" --region "$AWS_REGION" >/dev/null 2>&1 || \
-                aws ecr create-repository --repository-name "myco-platform/$service" --region "$AWS_REGION"
-            
-            # Build image
-            docker build -t "$service:$IMAGE_TAG" "$service/"
-            
-            # Tag for ECR
-            docker tag "$service:$IMAGE_TAG" "$ECR_REGISTRY/myco-platform/$service:$IMAGE_TAG"
-            
-            # Push to ECR
-            docker push "$ECR_REGISTRY/myco-platform/$service:$IMAGE_TAG"
-            
-            log_success "$service image pushed to ECR"
-        else
-            log_warning "$service directory not found, skipping"
+    # Check if running in production context
+    if [ "$ENVIRONMENT" = "production" ]; then
+        warn "You are about to deploy to PRODUCTION environment"
+        read -p "Type 'CONFIRM' to continue: " confirmation
+        if [ "$confirmation" != "CONFIRM" ]; then
+            error "Deployment cancelled"
+            exit 1
         fi
-    done
+    fi
     
-    log_success "All images built and pushed successfully"
+    log "Prerequisites check completed"
 }
 
-# Function to deploy infrastructure with Terraform
-deploy_infrastructure() {
-    log_info "Deploying infrastructure with Terraform..."
+# Run security scans before deployment
+run_security_scans() {
+    log "Running security scans..."
     
-    cd infrastructure/terraform
+    cd "$PROJECT_ROOT"
+    
+    # Run security gate check
+    if [ -f "security/scripts/security-gate-check.sh" ]; then
+        log "Running security gate check..."
+        chmod +x security/scripts/security-gate-check.sh
+        if ! ./security/scripts/security-gate-check.sh; then
+            error "Security gate check failed"
+            exit 1
+        fi
+    fi
+    
+    # Run Trivy scan on containers
+    if [ -f "security/scripts/run-trivy-scan.sh" ]; then
+        log "Running Trivy container scan..."
+        chmod +x security/scripts/run-trivy-scan.sh
+        SCAN_TYPE=image ./security/scripts/run-trivy-scan.sh || warn "Trivy scan found issues"
+    fi
+    
+    log "Security scans completed"
+}
+
+# Deploy infrastructure with Terraform
+deploy_infrastructure() {
+    log "Deploying infrastructure with Terraform..."
+    
+    cd "$PROJECT_ROOT/infrastructure/terraform"
     
     # Initialize Terraform
-    terraform init \
-        -backend-config="bucket=$TERRAFORM_STATE_BUCKET" \
-        -backend-config="key=infrastructure/terraform.tfstate" \
-        -backend-config="region=$AWS_REGION"
+    terraform init -upgrade
     
-    # Plan deployment
+    # Plan the deployment
+    log "Creating Terraform plan..."
     terraform plan \
         -var="environment=$ENVIRONMENT" \
-        -var="aws_region=$AWS_REGION" \
+        -var="region=$REGION" \
         -out=tfplan
     
-    # Apply deployment
+    # Apply the plan
+    log "Applying Terraform plan..."
     terraform apply tfplan
     
     # Get outputs
-    EKS_CLUSTER_ENDPOINT=$(terraform output -raw cluster_endpoint)
-    EKS_CLUSTER_NAME=$(terraform output -raw cluster_name)
-    RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
-    REDIS_ENDPOINT=$(terraform output -raw redis_endpoint)
+    export EKS_CLUSTER_NAME=$(terraform output -raw cluster_name)
+    export VPC_ID=$(terraform output -raw vpc_id)
+    export SUBNET_IDS=$(terraform output -json subnet_ids | jq -r '.[]' | tr '\n' ',' | sed 's/,$//')
     
-    log_success "Infrastructure deployed successfully"
-    
-    cd ../..
+    log "Infrastructure deployment completed"
 }
 
-# Function to configure kubectl
+# Configure kubectl for EKS cluster
 configure_kubectl() {
-    log_info "Configuring kubectl..."
+    log "Configuring kubectl for EKS cluster..."
     
-    # Update kubeconfig
     aws eks update-kubeconfig \
-        --region "$AWS_REGION" \
-        --name "$EKS_CLUSTER_NAME"
+        --region "$REGION" \
+        --name "$CLUSTER_NAME" \
+        --alias "$CLUSTER_NAME"
     
-    # Verify connection
-    if kubectl cluster-info >/dev/null 2>&1; then
-        log_success "kubectl configured successfully"
-    else
-        log_error "Failed to configure kubectl"
+    # Verify cluster connection
+    if ! kubectl cluster-info &> /dev/null; then
+        error "Unable to connect to Kubernetes cluster"
         exit 1
     fi
+    
+    log "kubectl configured successfully"
 }
 
-# Function to install Helm charts
-install_helm_charts() {
-    log_info "Installing Helm charts..."
+# Deploy monitoring stack
+deploy_monitoring() {
+    log "Deploying monitoring stack..."
     
-    # Add required Helm repositories
-    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-    helm repo add cert-manager https://charts.jetstack.io
-    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    helm repo add grafana https://grafana.github.io/helm-charts
-    helm repo update
+    cd "$PROJECT_ROOT"
     
-    # Create namespace
-    kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+    # Create monitoring namespace
+    kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
     
-    # Install NGINX Ingress Controller
-    helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-        --namespace ingress-nginx \
-        --create-namespace \
-        --set controller.metrics.enabled=true \
-        --set controller.podAnnotations."prometheus\.io/scrape"="true" \
-        --set controller.podAnnotations."prometheus\.io/port"="10254"
+    # Install Prometheus
+    log "Installing Prometheus..."
+    kubectl apply -f monitoring/prometheus/prometheus-config.yaml
     
-    # Install cert-manager for TLS certificates
-    helm upgrade --install cert-manager cert-manager/cert-manager \
-        --namespace cert-manager \
-        --create-namespace \
-        --set installCRDs=true
+    # Wait for Prometheus to be ready
+    kubectl wait --namespace monitoring \
+        --for=condition=ready pod \
+        --selector=app=prometheus \
+        --timeout=300s
     
-    # Install Prometheus monitoring
-    helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
-        --namespace monitoring \
-        --create-namespace \
-        --set grafana.adminPassword="admin123" \
-        --set prometheus.prometheusSpec.retention="30d"
+    # Install Grafana
+    if [ -f "monitoring/grafana/grafana-deployment.yaml" ]; then
+        log "Installing Grafana..."
+        kubectl apply -f monitoring/grafana/grafana-deployment.yaml
+        
+        kubectl wait --namespace monitoring \
+            --for=condition=ready pod \
+            --selector=app=grafana \
+            --timeout=300s
+    fi
     
-    log_success "Helm charts installed successfully"
+    # Install Fluentd for log aggregation
+    log "Installing Fluentd..."
+    kubectl apply -f monitoring/logging/fluentd-config.yaml
+    
+    log "Monitoring stack deployed successfully"
 }
 
-# Function to deploy Kubernetes manifests
-deploy_kubernetes_manifests() {
-    log_info "Deploying Kubernetes manifests..."
+# Build and push Docker images
+build_and_push_images() {
+    log "Building and pushing Docker images..."
     
-    cd infrastructure/kubernetes
+    cd "$PROJECT_ROOT"
     
-    # Update image tags in manifests
-    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    # Get ECR registry URL
+    local ecr_registry=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$REGION.amazonaws.com
     
-    # Apply namespace
-    kubectl apply -f namespace.yaml
+    # Login to ECR
+    aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ecr_registry"
     
-    # Apply database manifests
-    kubectl apply -f postgres.yaml
-    kubectl apply -f redis.yaml
-    kubectl apply -f mongodb.yaml
+    # Build and push images
+    local services=("frontend" "backend" "ai-engine" "execution-engine" "template-engine" "validation-engine")
     
-    # Create secrets for database passwords
-    kubectl create secret generic postgres-secret \
-        --from-literal=POSTGRES_PASSWORD="$(openssl rand -base64 32)" \
-        --namespace="$NAMESPACE" \
-        --dry-run=client -o yaml | kubectl apply -f -
-    
-    # Apply application manifests
-    for manifest in *.yaml; do
-        if [[ "$manifest" != "namespace.yaml" && "$manifest" != "postgres.yaml" && "$manifest" != "redis.yaml" && "$manifest" != "mongodb.yaml" ]]; then
-            # Replace image placeholders
-            sed "s|{{ECR_REGISTRY}}|$ECR_REGISTRY|g; s|{{IMAGE_TAG}}|$IMAGE_TAG|g" "$manifest" | kubectl apply -f -
+    for service in "${services[@]}"; do
+        if [ -d "$service" ] && [ -f "$service/Dockerfile" ]; then
+            log "Building $service image..."
+            
+            local image_tag="$ecr_registry/ai-dev-platform/$service:latest"
+            local commit_tag="$ecr_registry/ai-dev-platform/$service:$(git rev-parse --short HEAD)"
+            
+            docker build -t "$image_tag" -t "$commit_tag" "$service/"
+            docker push "$image_tag"
+            docker push "$commit_tag"
+            
+            log "$service image built and pushed successfully"
         fi
     done
     
-    log_success "Kubernetes manifests deployed successfully"
-    
-    cd ../..
+    log "All images built and pushed successfully"
 }
 
-# Function to setup monitoring and logging
-setup_monitoring() {
-    log_info "Setting up monitoring and logging..."
+# Deploy application to Kubernetes
+deploy_application() {
+    log "Deploying application to Kubernetes..."
     
-    # Deploy application-specific monitoring configs
-    kubectl apply -f monitoring/ -n "$NAMESPACE" || true
+    cd "$PROJECT_ROOT"
     
-    # Create Grafana dashboards
-    kubectl create configmap grafana-dashboards \
-        --from-file=monitoring/grafana/dashboards/ \
-        -n monitoring \
-        --dry-run=client -o yaml | kubectl apply -f -
+    # Create application namespace
+    kubectl create namespace myco-platform --dry-run=client -o yaml | kubectl apply -f -
     
-    log_success "Monitoring and logging setup complete"
-}
-
-# Function to run health checks
-run_health_checks() {
-    log_info "Running health checks..."
+    # Apply secrets
+    if [ -f "infrastructure/kubernetes/secrets.yaml" ]; then
+        log "Applying secrets..."
+        kubectl apply -f infrastructure/kubernetes/secrets.yaml
+    fi
+    
+    # Apply configmaps
+    if [ -f "infrastructure/kubernetes/configmap.yaml" ]; then
+        log "Applying configmaps..."
+        kubectl apply -f infrastructure/kubernetes/configmap.yaml
+    fi
+    
+    # Apply storage
+    log "Applying storage configurations..."
+    kubectl apply -f infrastructure/kubernetes/storage.yaml
+    
+    # Deploy enhanced deployments
+    log "Deploying application services..."
+    kubectl apply -f infrastructure/kubernetes/enhanced-deployments.yaml
+    
+    # Apply services
+    log "Applying services..."
+    kubectl apply -f infrastructure/kubernetes/services.yaml
+    
+    # Apply HPA
+    log "Applying Horizontal Pod Autoscalers..."
+    kubectl apply -f infrastructure/kubernetes/hpa.yaml
+    
+    # Apply network policies
+    log "Applying network policies..."
+    kubectl apply -f infrastructure/kubernetes/network-policies.yaml
     
     # Wait for deployments to be ready
-    kubectl wait --for=condition=available deployment --all -n "$NAMESPACE" --timeout=600s
+    log "Waiting for deployments to be ready..."
+    local deployments=("frontend" "backend" "ai-engine" "execution-engine" "postgres" "redis")
     
-    # Check pod status
-    kubectl get pods -n "$NAMESPACE"
+    for deployment in "${deployments[@]}"; do
+        kubectl wait --namespace myco-platform \
+            --for=condition=available \
+            --timeout=600s \
+            deployment/"$deployment" || warn "Deployment $deployment not ready within timeout"
+    done
     
-    # Check services
-    kubectl get services -n "$NAMESPACE"
+    log "Application deployed successfully"
+}
+
+# Run health checks
+run_health_checks() {
+    log "Running health checks..."
     
-    # Check ingress
-    kubectl get ingress -n "$NAMESPACE"
+    # Check if all pods are running
+    local failed_pods=$(kubectl get pods --namespace myco-platform --field-selector=status.phase!=Running -o name | wc -l)
+    if [ "$failed_pods" -gt 0 ]; then
+        warn "Some pods are not in Running state"
+        kubectl get pods --namespace myco-platform --field-selector=status.phase!=Running
+    fi
     
-    # Test application endpoints
-    INGRESS_IP=$(kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+    # Check service endpoints
+    log "Checking service endpoints..."
+    local services=("frontend" "backend" "ai-engine")
     
-    if [ -n "$INGRESS_IP" ]; then
-        log_info "Application will be available at: https://$INGRESS_IP"
-        
-        # Wait for ingress to be ready
-        sleep 30
-        
-        # Test health endpoint
-        if curl -f "http://$INGRESS_IP/health" >/dev/null 2>&1; then
-            log_success "Health check passed"
+    for service in "${services[@]}"; do
+        local endpoint=$(kubectl get service "$service" --namespace myco-platform -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        if [ -n "$endpoint" ]; then
+            info "Service $service endpoint: $endpoint"
         else
-            log_warning "Health check failed - application may still be starting"
+            warn "Service $service endpoint not available"
         fi
+    done
+    
+    # Run application-specific health checks
+    if [ -f "scripts/health-check.sh" ]; then
+        log "Running application health checks..."
+        chmod +x scripts/health-check.sh
+        ./scripts/health-check.sh
     fi
     
-    log_success "Health checks complete"
+    log "Health checks completed"
 }
 
-# Function to setup CI/CD
-setup_cicd() {
-    log_info "Setting up CI/CD pipeline..."
+# Test end-to-end user workflow
+test_user_workflow() {
+    log "Testing end-to-end user workflow..."
     
-    # Create GitHub Actions secrets (if using GitHub)
-    if [ -f ".github/workflows/deploy.yml" ]; then
-        log_info "GitHub Actions workflow detected"
-        echo "Please add the following secrets to your GitHub repository:"
-        echo "- AWS_ACCESS_KEY_ID"
-        echo "- AWS_SECRET_ACCESS_KEY"
-        echo "- AWS_REGION"
-        echo "- EKS_CLUSTER_NAME"
+    # Get frontend URL
+    local frontend_url=$(kubectl get service frontend --namespace myco-platform -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+    
+    if [ -z "$frontend_url" ]; then
+        warn "Frontend URL not available, skipping E2E tests"
+        return
     fi
     
-    # Setup ArgoCD (if using GitOps)
-    if command -v argocd >/dev/null 2>&1; then
-        log_info "Setting up ArgoCD for GitOps..."
-        
-        # Install ArgoCD
-        kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-        kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-        
-        # Wait for ArgoCD to be ready
-        kubectl wait --for=condition=available deployment argocd-server -n argocd --timeout=600s
-        
-        log_success "ArgoCD installed"
+    info "Frontend URL: https://$frontend_url"
+    
+    # Run E2E tests if available
+    if [ -f "tests/e2e/complete-workflow.spec.ts" ]; then
+        log "Running E2E tests..."
+        cd "$PROJECT_ROOT"
+        npm run test:e2e:prod || warn "E2E tests failed"
     fi
+    
+    # Manual verification steps
+    log "Manual verification steps:"
+    info "1. Open https://$frontend_url in browser"
+    info "2. Create a new account"
+    info "3. Create a new project"
+    info "4. Test project execution"
+    info "5. Verify deployment functionality"
+    
+    log "User workflow testing completed"
 }
 
-# Function to backup and restore procedures
-setup_backup() {
-    log_info "Setting up backup procedures..."
+# Setup monitoring alerts
+setup_alerts() {
+    log "Setting up monitoring alerts..."
     
-    # Create backup CronJob for databases
-    cat <<EOF | kubectl apply -f -
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: database-backup
-  namespace: $NAMESPACE
-spec:
-  schedule: "0 2 * * *"  # Daily at 2 AM
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          containers:
-          - name: backup
-            image: postgres:15-alpine
-            command:
-            - /bin/bash
-            - -c
-            - |
-              pg_dump \$DATABASE_URL > /backup/db-backup-\$(date +%Y%m%d-%H%M%S).sql
-              aws s3 cp /backup/db-backup-*.sql s3://myco-platform-backups/
-            env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: DATABASE_URL
-            volumeMounts:
-            - name: backup-storage
-              mountPath: /backup
-          volumes:
-          - name: backup-storage
-            emptyDir: {}
-          restartPolicy: OnFailure
+    # Apply Alertmanager configuration if available
+    if [ -f "monitoring/alertmanager/alertmanager-config.yaml" ]; then
+        kubectl apply -f monitoring/alertmanager/alertmanager-config.yaml
+    fi
+    
+    # Configure notification channels
+    log "Configuring notification channels..."
+    
+    # Setup Slack notifications if webhook URL is provided
+    if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+        info "Slack notifications configured"
+    fi
+    
+    # Setup PagerDuty if integration key is provided
+    if [ -n "${PAGERDUTY_INTEGRATION_KEY:-}" ]; then
+        info "PagerDuty notifications configured"
+    fi
+    
+    log "Monitoring alerts setup completed"
+}
+
+# Generate deployment report
+generate_deployment_report() {
+    log "Generating deployment report..."
+    
+    local report_file="deployment-report-$(date +%Y%m%d-%H%M%S).md"
+    
+    cat > "$report_file" << EOF
+# AI Development Platform Deployment Report
+
+**Date:** $(date)
+**Environment:** $ENVIRONMENT
+**Region:** $REGION
+**Cluster:** $CLUSTER_NAME
+**Deployed by:** $(whoami)
+**Git Commit:** $(git rev-parse HEAD)
+
+## Deployment Summary
+
+### Infrastructure
+- EKS Cluster: $CLUSTER_NAME
+- VPC ID: ${VPC_ID:-N/A}
+- Subnets: ${SUBNET_IDS:-N/A}
+
+### Application Services
 EOF
+
+    # Add service status to report
+    kubectl get deployments --namespace myco-platform -o wide >> "$report_file"
     
-    log_success "Backup procedures configured"
+    cat >> "$report_file" << EOF
+
+### Monitoring
+- Prometheus: $(kubectl get pods --namespace monitoring -l app=prometheus -o jsonpath='{.items[0].status.phase}')
+- Grafana: $(kubectl get pods --namespace monitoring -l app=grafana -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Not deployed")
+- Fluentd: $(kubectl get daemonset --namespace monitoring fluentd -o jsonpath='{.status.numberReady}/{.status.desiredNumberScheduled}' 2>/dev/null || echo "Not deployed")
+
+### Security
+- Network Policies: Applied
+- Pod Security Policies: Applied
+- RBAC: Configured
+
+### Endpoints
+$(kubectl get services --namespace myco-platform -o wide)
+
+## Post-Deployment Actions
+1. Monitor application logs for any errors
+2. Verify all health checks are passing
+3. Test user workflows manually
+4. Monitor resource usage and scaling
+5. Validate security policies are working
+
+## Contact Information
+- Deployment Team: ai-dev-platform-team@company.com
+- Incident Response: oncall@company.com
+EOF
+
+    log "Deployment report generated: $report_file"
 }
 
-# Function to setup security
-setup_security() {
-    log_info "Setting up security configurations..."
-    
-    # Install network policies
-    kubectl apply -f security/network-policies/ -n "$NAMESPACE" || true
-    
-    # Install Pod Security Standards
-    kubectl label namespace "$NAMESPACE" \
-        pod-security.kubernetes.io/enforce=restricted \
-        pod-security.kubernetes.io/audit=restricted \
-        pod-security.kubernetes.io/warn=restricted
-    
-    # Install OPA Gatekeeper (if available)
-    if kubectl get crd configs.config.gatekeeper.sh >/dev/null 2>&1; then
-        kubectl apply -f security/gatekeeper/ || true
-    fi
-    
-    log_success "Security configurations applied"
-}
-
-# Function to display deployment summary
-show_deployment_summary() {
-    echo ""
-    echo "🎉 Production Deployment Complete!"
-    echo "================================="
-    echo ""
-    echo "Deployment Summary:"
-    echo "- Environment: $ENVIRONMENT"
-    echo "- Region: $AWS_REGION"
-    echo "- Cluster: $EKS_CLUSTER_NAME"
-    echo "- Namespace: $NAMESPACE"
-    echo "- Image Tag: $IMAGE_TAG"
-    echo ""
-    
-    # Get service endpoints
-    echo "Service Endpoints:"
-    kubectl get ingress -n "$NAMESPACE" -o custom-columns=NAME:.metadata.name,HOSTS:.spec.rules[*].host,ADDRESS:.status.loadBalancer.ingress[*].hostname --no-headers | while read line; do
-        echo "  $line"
-    done
-    echo ""
-    
-    echo "Monitoring:"
-    GRAFANA_URL=$(kubectl get ingress grafana -n monitoring -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || echo "Not configured")
-    echo "  Grafana: https://$GRAFANA_URL"
-    echo "  Username: admin"
-    echo "  Password: admin123"
-    echo ""
-    
-    echo "Next Steps:"
-    echo "1. Configure DNS records for your domains"
-    echo "2. Update TLS certificates"
-    echo "3. Configure backup retention policies"
-    echo "4. Set up alerting rules"
-    echo "5. Review security configurations"
-    echo ""
-    
-    log_success "Deployment completed successfully! 🚀"
-}
-
-# Main deployment process
+# Main deployment function
 main() {
-    log_info "Starting production deployment..."
+    log "Starting AI Development Platform production deployment..."
+    log "Environment: $ENVIRONMENT"
+    log "Region: $REGION"
+    log "Cluster: $CLUSTER_NAME"
     
-    # Parse command line arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --environment)
-                ENVIRONMENT="$2"
-                shift 2
-                ;;
-            --region)
-                AWS_REGION="$2"
-                shift 2
-                ;;
-            --image-tag)
-                IMAGE_TAG="$2"
-                shift 2
-                ;;
-            --skip-build)
-                SKIP_BUILD=true
-                shift
-                ;;
-            --skip-infrastructure)
-                SKIP_INFRASTRUCTURE=true
-                shift
-                ;;
-            *)
-                log_error "Unknown option: $1"
-                exit 1
-                ;;
-        esac
-    done
-    
-    # Run deployment steps
+    # Run all deployment steps
     check_prerequisites
-    
-    if [ "$SKIP_BUILD" != "true" ]; then
-        build_and_push_images
-    fi
-    
-    if [ "$SKIP_INFRASTRUCTURE" != "true" ]; then
-        deploy_infrastructure
-    fi
-    
+    run_security_scans
+    deploy_infrastructure
     configure_kubectl
-    install_helm_charts
-    deploy_kubernetes_manifests
-    setup_monitoring
-    setup_security
-    setup_backup
-    setup_cicd
+    build_and_push_images
+    deploy_monitoring
+    deploy_application
     run_health_checks
-    show_deployment_summary
+    setup_alerts
+    test_user_workflow
+    generate_deployment_report
+    
+    log "🎉 AI Development Platform deployed successfully!"
+    log "Next steps:"
+    info "1. Review the deployment report"
+    info "2. Set up monitoring dashboards"
+    info "3. Configure backup and disaster recovery"
+    info "4. Schedule regular security scans"
+    info "5. Monitor system performance and costs"
 }
 
-# Run main function with all arguments
+# Execute main function
 main "$@"

@@ -1,0 +1,59 @@
+# Snyk configuration for AI Development Platform
+# This file configures how Snyk scans for vulnerabilities
+
+# Severity thresholds
+severity-threshold: medium
+
+# Test settings
+test:
+  # Exclude dev dependencies from vulnerability scanning
+  dev: false
+  
+  # Fail on specific severity levels
+  severity-threshold: high
+  
+  # Custom ignore policies
+  ignore-policy: .snyk
+
+# Monitor settings for continuous monitoring
+monitor: true
+
+# Language specific settings
+language-settings:
+  javascript:
+    # Include yarn.lock and package-lock.json
+    include-dev-deps: false
+    
+  python:
+    # Include requirements files
+    include-dev-deps: false
+
+# Paths to exclude from scanning
+exclude:
+  - node_modules/
+  - dist/
+  - build/
+  - coverage/
+  - .git/
+  - "**/*.test.js"
+  - "**/*.test.ts"
+  - "**/*.spec.js"
+  - "**/*.spec.ts"
+
+# Docker image scanning configuration
+docker:
+  # Exclude base image vulnerabilities
+  exclude-base-image-vulns: false
+  
+  # Severity threshold for container scanning
+  severity-threshold: medium
+
+# Organization settings
+org: ai-dev-platform
+
+# Project settings
+project-name: ai-development-platform
+
+# Reporting
+report: true
+json: true

@@ -1,316 +1,457 @@
-import { performance } from 'perf_hooks';
+/**
+ * Advanced Metrics Collector for AI Development Platform
+ * Provides comprehensive metrics collection with Prometheus integration
+ */
 
-interface MetricData {
-  name: string;
-  value: number;
-  tags?: Record<string, string>;
-  timestamp: number;
-}
+import { register, Counter, Histogram, Gauge, Summary, collectDefaultMetrics } from 'prom-client';
+import { Request, Response } from 'express';
 
-interface CounterMetric {
-  name: string;
-  value: number;
-  tags: Record<string, string>;
-}
-
-interface GaugeMetric {
-  name: string;
-  value: number;
-  tags: Record<string, string>;
-}
-
-interface HistogramMetric {
-  name: string;
-  values: number[];
-  tags: Record<string, string>;
-}
+// Enable default metrics collection
+collectDefaultMetrics({ register });
 
 export class MetricsCollector {
-  private static instance: MetricsCollector;
-  private counters: Map<string, CounterMetric> = new Map();
-  private gauges: Map<string, GaugeMetric> = new Map();
-  private histograms: Map<string, HistogramMetric> = new Map();
-  private startTimes: Map<string, number> = new Map();
+  // HTTP Metrics
+  public httpRequestsTotal = new Counter({
+    name: 'http_requests_total',
+    help: 'Total number of HTTP requests',
+    labelNames: ['method', 'route', 'status_code', 'user_agent']
+  });
 
-  static getInstance(): MetricsCollector {
-    if (!MetricsCollector.instance) {
-      MetricsCollector.instance = new MetricsCollector();
-    }
-    return MetricsCollector.instance;
+  public httpRequestDuration = new Histogram({
+    name: 'http_request_duration_seconds',
+    help: 'Duration of HTTP requests in seconds',
+    labelNames: ['method', 'route', 'status_code'],
+    buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+  });
+
+  public httpRequestSize = new Histogram({
+    name: 'http_request_size_bytes',
+    help: 'Size of HTTP requests in bytes',
+    labelNames: ['method', 'route'],
+    buckets: [10, 100, 1000, 10000, 100000, 1000000, 10000000]
+  });
+
+  public httpResponseSize = new Histogram({
+    name: 'http_response_size_bytes',
+    help: 'Size of HTTP responses in bytes',
+    labelNames: ['method', 'route', 'status_code'],
+    buckets: [10, 100, 1000, 10000, 100000, 1000000, 10000000]
+  });
+
+  // AI Engine Metrics
+  public aiCompletionsTotal = new Counter({
+    name: 'ai_completions_total',
+    help: 'Total number of AI completions',
+    labelNames: ['provider', 'model', 'status']
+  });
+
+  public aiTokensUsedTotal = new Counter({
+    name: 'ai_tokens_used_total',
+    help: 'Total number of AI tokens used',
+    labelNames: ['provider', 'model', 'type'] // type: input, output
+  });
+
+  public aiModelRequestDuration = new Histogram({
+    name: 'ai_model_request_duration_seconds',
+    help: 'Duration of AI model requests in seconds',
+    labelNames: ['provider', 'model'],
+    buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120]
+  });
+
+  public aiQueueLength = new Gauge({
+    name: 'ai_queue_length',
+    help: 'Current length of AI request queue',
+    labelNames: ['provider', 'priority']
+  });
+
+  public aiCostTotal = new Counter({
+    name: 'ai_cost_total',
+    help: 'Total AI API costs in USD',
+    labelNames: ['provider', 'model']
+  });
+
+  // Database Metrics
+  public dbConnectionsActive = new Gauge({
+    name: 'db_connections_active',
+    help: 'Number of active database connections',
+    labelNames: ['database', 'user']
+  });
+
+  public dbConnectionsIdle = new Gauge({
+    name: 'db_connections_idle',
+    help: 'Number of idle database connections',
+    labelNames: ['database']
+  });
+
+  public dbQueryDuration = new Histogram({
+    name: 'db_query_duration_seconds',
+    help: 'Duration of database queries in seconds',
+    labelNames: ['database', 'operation', 'table'],
+    buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10]
+  });
+
+  public dbQueriesTotal = new Counter({
+    name: 'db_queries_total',
+    help: 'Total number of database queries',
+    labelNames: ['database', 'operation', 'table', 'status']
+  });
+
+  public dbRowsAffected = new Histogram({
+    name: 'db_rows_affected',
+    help: 'Number of rows affected by database operations',
+    labelNames: ['database', 'operation', 'table'],
+    buckets: [1, 10, 100, 1000, 10000, 100000]
+  });
+
+  // Cache Metrics
+  public cacheOperationsTotal = new Counter({
+    name: 'cache_operations_total',
+    help: 'Total number of cache operations',
+    labelNames: ['operation', 'status'] // operation: get, set, delete; status: hit, miss, success, error
+  });
+
+  public cacheKeyCount = new Gauge({
+    name: 'cache_keys_total',
+    help: 'Total number of keys in cache'
+  });
+
+  public cacheMemoryUsage = new Gauge({
+    name: 'cache_memory_usage_bytes',
+    help: 'Cache memory usage in bytes'
+  });
+
+  public cacheOperationDuration = new Histogram({
+    name: 'cache_operation_duration_seconds',
+    help: 'Duration of cache operations in seconds',
+    labelNames: ['operation'],
+    buckets: [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
+  });
+
+  // Execution Engine Metrics
+  public codeExecutionsTotal = new Counter({
+    name: 'code_executions_total',
+    help: 'Total number of code executions',
+    labelNames: ['language', 'status', 'template']
+  });
+
+  public codeExecutionDuration = new Histogram({
+    name: 'code_execution_duration_seconds',
+    help: 'Duration of code executions in seconds',
+    labelNames: ['language', 'template'],
+    buckets: [1, 5, 10, 30, 60, 120, 300, 600]
+  });
+
+  public containerOperationsTotal = new Counter({
+    name: 'container_operations_total',
+    help: 'Total number of container operations',
+    labelNames: ['operation', 'status'] // operation: create, start, stop, remove
+  });
+
+  public activeContainers = new Gauge({
+    name: 'active_containers',
+    help: 'Number of active containers',
+    labelNames: ['language', 'template']
+  });
+
+  // File System Metrics
+  public fileOperationsTotal = new Counter({
+    name: 'file_operations_total',
+    help: 'Total number of file operations',
+    labelNames: ['operation', 'status'] // operation: read, write, delete, create
+  });
+
+  public projectFilesCount = new Gauge({
+    name: 'project_files_count',
+    help: 'Number of files per project',
+    labelNames: ['project_id', 'file_type']
+  });
+
+  public projectSizeBytes = new Gauge({
+    name: 'project_size_bytes',
+    help: 'Project size in bytes',
+    labelNames: ['project_id']
+  });
+
+  // User and Authentication Metrics
+  public userSessionsActive = new Gauge({
+    name: 'user_sessions_active',
+    help: 'Number of active user sessions'
+  });
+
+  public authenticationAttempts = new Counter({
+    name: 'authentication_attempts_total',
+    help: 'Total number of authentication attempts',
+    labelNames: ['method', 'status'] // method: password, oauth, api_key; status: success, failure
+  });
+
+  public userActionsTotal = new Counter({
+    name: 'user_actions_total',
+    help: 'Total number of user actions',
+    labelNames: ['action', 'user_id']
+  });
+
+  // Business Metrics
+  public projectsCreatedTotal = new Counter({
+    name: 'projects_created_total',
+    help: 'Total number of projects created',
+    labelNames: ['template', 'user_tier']
+  });
+
+  public projectsActiveGauge = new Gauge({
+    name: 'projects_active',
+    help: 'Number of active projects',
+    labelNames: ['template']
+  });
+
+  public deploymentsTotal = new Counter({
+    name: 'deployments_total',
+    help: 'Total number of deployments',
+    labelNames: ['status', 'environment', 'template']
+  });
+
+  public revenueTotal = new Counter({
+    name: 'revenue_total_usd',
+    help: 'Total revenue in USD',
+    labelNames: ['plan', 'payment_method']
+  });
+
+  // Security Metrics
+  public securityEventsTotal = new Counter({
+    name: 'security_events_total',
+    help: 'Total number of security events',
+    labelNames: ['event_type', 'severity', 'source']
+  });
+
+  public suspiciousActivitiesTotal = new Counter({
+    name: 'suspicious_activities_total',
+    help: 'Total number of suspicious activities',
+    labelNames: ['activity_type', 'risk_level', 'user_id']
+  });
+
+  public rateLimitHitsTotal = new Counter({
+    name: 'rate_limit_hits_total',
+    help: 'Total number of rate limit hits',
+    labelNames: ['endpoint', 'user_id', 'limit_type']
+  });
+
+  // System Resource Metrics
+  public customCpuUsage = new Gauge({
+    name: 'system_cpu_usage_percent',
+    help: 'System CPU usage percentage',
+    labelNames: ['component']
+  });
+
+  public customMemoryUsage = new Gauge({
+    name: 'system_memory_usage_bytes',
+    help: 'System memory usage in bytes',
+    labelNames: ['component', 'type'] // type: heap, rss, external
+  });
+
+  public customDiskUsage = new Gauge({
+    name: 'system_disk_usage_bytes',
+    help: 'System disk usage in bytes',
+    labelNames: ['component', 'mount_point']
+  });
+
+  // Error and Warning Metrics
+  public errorsTotal = new Counter({
+    name: 'errors_total',
+    help: 'Total number of errors',
+    labelNames: ['component', 'error_type', 'severity']
+  });
+
+  public warningsTotal = new Counter({
+    name: 'warnings_total',
+    help: 'Total number of warnings',
+    labelNames: ['component', 'warning_type']
+  });
+
+  // Performance Summary Metrics
+  public responseTimeSummary = new Summary({
+    name: 'response_time_summary_seconds',
+    help: 'Summary of response times',
+    labelNames: ['component', 'operation'],
+    maxAgeSeconds: 600,
+    ageBuckets: 5
+  });
+
+  public throughputSummary = new Summary({
+    name: 'throughput_summary_ops_per_second',
+    help: 'Summary of operations per second',
+    labelNames: ['component', 'operation'],
+    maxAgeSeconds: 600,
+    ageBuckets: 5
+  });
+
+  constructor() {
+    // Initialize metrics with default values
+    this.initializeDefaultMetrics();
   }
 
-  // Counter metrics - values that only increase
-  incrementCounter(name: string, value: number = 1, tags: Record<string, string> = {}): void {
-    const key = this.getMetricKey(name, tags);
-    const existing = this.counters.get(key);
-    
-    if (existing) {
-      existing.value += value;
-    } else {
-      this.counters.set(key, { name, value, tags });
-    }
+  private initializeDefaultMetrics(): void {
+    // Set initial values for gauges to avoid missing metrics
+    this.userSessionsActive.set(0);
+    this.aiQueueLength.set(0, 'default');
+    this.dbConnectionsActive.set(0, 'postgres', 'app');
+    this.dbConnectionsIdle.set(0, 'postgres');
+    this.activeContainers.set(0, 'nodejs', 'default');
+    this.projectsActiveGauge.set(0, 'default');
+    this.cacheKeyCount.set(0);
+    this.cacheMemoryUsage.set(0);
   }
 
-  // Gauge metrics - values that can go up or down
-  setGauge(name: string, value: number, tags: Record<string, string> = {}): void {
-    const key = this.getMetricKey(name, tags);
-    this.gauges.set(key, { name, value, tags });
-  }
+  // HTTP Request Middleware
+  public httpMetricsMiddleware() {
+    return (req: Request, res: Response, next: Function) => {
+      const start = Date.now();
+      const requestSize = parseInt(req.headers['content-length'] || '0', 10);
 
-  incrementGauge(name: string, value: number = 1, tags: Record<string, string> = {}): void {
-    const key = this.getMetricKey(name, tags);
-    const existing = this.gauges.get(key);
-    
-    if (existing) {
-      existing.value += value;
-    } else {
-      this.gauges.set(key, { name, value, tags });
-    }
-  }
-
-  decrementGauge(name: string, value: number = 1, tags: Record<string, string> = {}): void {
-    this.incrementGauge(name, -value, tags);
-  }
-
-  // Histogram metrics - track distribution of values
-  recordHistogram(name: string, value: number, tags: Record<string, string> = {}): void {
-    const key = this.getMetricKey(name, tags);
-    const existing = this.histograms.get(key);
-    
-    if (existing) {
-      existing.values.push(value);
-      // Keep only last 1000 values to prevent memory issues
-      if (existing.values.length > 1000) {
-        existing.values = existing.values.slice(-1000);
+      // Track request size
+      if (requestSize > 0) {
+        this.httpRequestSize.observe(
+          { method: req.method, route: req.route?.path || req.path },
+          requestSize
+        );
       }
-    } else {
-      this.histograms.set(key, { name, values: [value], tags });
-    }
-  }
 
-  // Timing utilities
-  startTimer(name: string): string {
-    const timerId = `${name}_${Date.now()}_${Math.random()}`;
-    this.startTimes.set(timerId, performance.now());
-    return timerId;
-  }
+      // Override res.end to capture response metrics
+      const originalEnd = res.end;
+      res.end = function(chunk?: any) {
+        const duration = (Date.now() - start) / 1000;
+        const statusCode = res.statusCode.toString();
+        const userAgent = req.headers['user-agent'] || 'unknown';
+        
+        // Record metrics
+        metricsCollector.httpRequestsTotal.inc({
+          method: req.method,
+          route: req.route?.path || req.path,
+          status_code: statusCode,
+          user_agent: userAgent
+        });
 
-  endTimer(timerId: string, metricName: string, tags: Record<string, string> = {}): number {
-    const startTime = this.startTimes.get(timerId);
-    if (!startTime) {
-      throw new Error(`Timer ${timerId} not found`);
-    }
-    
-    const duration = performance.now() - startTime;
-    this.recordHistogram(metricName, duration, tags);
-    this.startTimes.delete(timerId);
-    
-    return duration;
-  }
+        metricsCollector.httpRequestDuration.observe(
+          { method: req.method, route: req.route?.path || req.path, status_code: statusCode },
+          duration
+        );
 
-  // Convenience method for timing operations
-  async timeOperation<T>(
-    name: string, 
-    operation: () => Promise<T>, 
-    tags: Record<string, string> = {}
-  ): Promise<T> {
-    const timerId = this.startTimer(name);
-    try {
-      const result = await operation();
-      this.endTimer(timerId, `${name}_duration`, { ...tags, status: 'success' });
-      return result;
-    } catch (error) {
-      this.endTimer(timerId, `${name}_duration`, { ...tags, status: 'error' });
-      this.incrementCounter(`${name}_errors`, 1, tags);
-      throw error;
-    }
-  }
+        // Track response size
+        if (chunk) {
+          const responseSize = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk, 'utf8');
+          metricsCollector.httpResponseSize.observe(
+            { method: req.method, route: req.route?.path || req.path, status_code: statusCode },
+            responseSize
+          );
+        }
 
-  // Business metrics
-  recordUserAction(action: string, userId: string, projectId?: string): void {
-    const tags: Record<string, string> = { action, userId };
-    if (projectId) tags.projectId = projectId;
-    
-    this.incrementCounter('user_actions_total', 1, tags);
-  }
+        originalEnd.call(this, chunk);
+      };
 
-  recordAPICall(endpoint: string, method: string, statusCode: number, duration: number): void {
-    const tags = { 
-      endpoint: endpoint.replace(/\/[0-9a-f-]{36}/g, '/:id'), // Replace UUIDs with :id
-      method, 
-      status: Math.floor(statusCode / 100).toString() + 'xx' 
-    };
-    
-    this.incrementCounter('api_requests_total', 1, tags);
-    this.recordHistogram('api_request_duration', duration, tags);
-    
-    if (statusCode >= 400) {
-      this.incrementCounter('api_errors_total', 1, { ...tags, status_code: statusCode.toString() });
-    }
-  }
-
-  recordDatabaseOperation(operation: string, table: string, duration: number, success: boolean): void {
-    const tags = { operation, table, status: success ? 'success' : 'error' };
-    
-    this.incrementCounter('database_operations_total', 1, tags);
-    this.recordHistogram('database_operation_duration', duration, tags);
-    
-    if (!success) {
-      this.incrementCounter('database_errors_total', 1, tags);
-    }
-  }
-
-  recordFileOperation(operation: string, fileType: string, size: number, success: boolean): void {
-    const tags = { operation, file_type: fileType, status: success ? 'success' : 'error' };
-    
-    this.incrementCounter('file_operations_total', 1, tags);
-    this.recordHistogram('file_size_bytes', size, tags);
-    
-    if (!success) {
-      this.incrementCounter('file_operation_errors_total', 1, tags);
-    }
-  }
-
-  recordAIUsage(provider: string, model: string, promptTokens: number, completionTokens: number): void {
-    const tags = { provider, model };
-    
-    this.incrementCounter('ai_requests_total', 1, tags);
-    this.incrementCounter('ai_tokens_total', promptTokens + completionTokens, { ...tags, type: 'total' });
-    this.incrementCounter('ai_tokens_total', promptTokens, { ...tags, type: 'prompt' });
-    this.incrementCounter('ai_tokens_total', completionTokens, { ...tags, type: 'completion' });
-  }
-
-  // System metrics
-  recordSystemMetrics(): void {
-    if (typeof process !== 'undefined') {
-      const memUsage = process.memoryUsage();
-      
-      this.setGauge('nodejs_memory_usage_bytes', memUsage.rss, { type: 'rss' });
-      this.setGauge('nodejs_memory_usage_bytes', memUsage.heapUsed, { type: 'heap_used' });
-      this.setGauge('nodejs_memory_usage_bytes', memUsage.heapTotal, { type: 'heap_total' });
-      this.setGauge('nodejs_memory_usage_bytes', memUsage.external, { type: 'external' });
-      
-      const cpuUsage = process.cpuUsage();
-      this.setGauge('nodejs_cpu_usage_seconds', cpuUsage.user / 1000000, { type: 'user' });
-      this.setGauge('nodejs_cpu_usage_seconds', cpuUsage.system / 1000000, { type: 'system' });
-      
-      this.setGauge('nodejs_uptime_seconds', process.uptime());
-    }
-  }
-
-  // Get all metrics in Prometheus format
-  getPrometheusMetrics(): string {
-    const lines: string[] = [];
-    
-    // Counters
-    for (const [key, metric] of this.counters) {
-      const tagsStr = this.formatPrometheusTags(metric.tags);
-      lines.push(`# TYPE ${metric.name} counter`);
-      lines.push(`${metric.name}${tagsStr} ${metric.value}`);
-    }
-    
-    // Gauges
-    for (const [key, metric] of this.gauges) {
-      const tagsStr = this.formatPrometheusTags(metric.tags);
-      lines.push(`# TYPE ${metric.name} gauge`);
-      lines.push(`${metric.name}${tagsStr} ${metric.value}`);
-    }
-    
-    // Histograms
-    for (const [key, metric] of this.histograms) {
-      const tagsStr = this.formatPrometheusTags(metric.tags);
-      const sorted = metric.values.slice().sort((a, b) => a - b);
-      
-      lines.push(`# TYPE ${metric.name} histogram`);
-      
-      // Calculate percentiles
-      const percentiles = [0.5, 0.95, 0.99];
-      for (const p of percentiles) {
-        const index = Math.ceil(sorted.length * p) - 1;
-        const value = sorted[Math.max(0, index)] || 0;
-        const pTags = { ...metric.tags, quantile: p.toString() };
-        const pTagsStr = this.formatPrometheusTags(pTags);
-        lines.push(`${metric.name}${pTagsStr} ${value}`);
-      }
-      
-      // Count and sum
-      const countTags = this.formatPrometheusTags(metric.tags);
-      lines.push(`${metric.name}_count${countTags} ${metric.values.length}`);
-      lines.push(`${metric.name}_sum${countTags} ${metric.values.reduce((a, b) => a + b, 0)}`);
-    }
-    
-    return lines.join('\n') + '\n';
-  }
-
-  // Get metrics as JSON
-  getMetrics(): {
-    counters: CounterMetric[];
-    gauges: GaugeMetric[];
-    histograms: Array<HistogramMetric & { stats: any }>;
-  } {
-    return {
-      counters: Array.from(this.counters.values()),
-      gauges: Array.from(this.gauges.values()),
-      histograms: Array.from(this.histograms.values()).map(h => ({
-        ...h,
-        stats: this.calculateHistogramStats(h.values)
-      }))
+      next();
     };
   }
 
-  // Reset all metrics
-  reset(): void {
-    this.counters.clear();
-    this.gauges.clear();
-    this.histograms.clear();
-    this.startTimes.clear();
+  // Method to manually record AI operations
+  public recordAiCompletion(provider: string, model: string, status: string, tokens: number, cost: number, duration: number): void {
+    this.aiCompletionsTotal.inc({ provider, model, status });
+    this.aiTokensUsedTotal.inc({ provider, model, type: 'total' }, tokens);
+    this.aiModelRequestDuration.observe({ provider, model }, duration);
+    this.aiCostTotal.inc({ provider, model }, cost);
   }
 
-  private getMetricKey(name: string, tags: Record<string, string>): string {
-    const sortedTags = Object.keys(tags)
-      .sort()
-      .map(key => `${key}=${tags[key]}`)
-      .join(',');
-    return `${name}{${sortedTags}}`;
-  }
-
-  private formatPrometheusTags(tags: Record<string, string>): string {
-    if (Object.keys(tags).length === 0) return '';
-    
-    const tagPairs = Object.entries(tags)
-      .map(([key, value]) => `${key}="${value.replace(/"/g, '\\"')}"`)
-      .join(',');
-    
-    return `{${tagPairs}}`;
-  }
-
-  private calculateHistogramStats(values: number[]): any {
-    if (values.length === 0) {
-      return { count: 0, sum: 0, avg: 0, min: 0, max: 0, p50: 0, p95: 0, p99: 0 };
+  // Method to record database operations
+  public recordDatabaseOperation(database: string, operation: string, table: string, duration: number, rowsAffected: number, status: string): void {
+    this.dbQueriesTotal.inc({ database, operation, table, status });
+    this.dbQueryDuration.observe({ database, operation, table }, duration);
+    if (rowsAffected > 0) {
+      this.dbRowsAffected.observe({ database, operation, table }, rowsAffected);
     }
-    
-    const sorted = values.slice().sort((a, b) => a - b);
-    const sum = values.reduce((a, b) => a + b, 0);
+  }
+
+  // Method to record cache operations
+  public recordCacheOperation(operation: string, status: string, duration: number): void {
+    this.cacheOperationsTotal.inc({ operation, status });
+    this.cacheOperationDuration.observe({ operation }, duration);
+  }
+
+  // Method to record code execution
+  public recordCodeExecution(language: string, template: string, status: string, duration: number): void {
+    this.codeExecutionsTotal.inc({ language, status, template });
+    this.codeExecutionDuration.observe({ language, template }, duration);
+  }
+
+  // Method to update active containers count
+  public updateActiveContainers(language: string, template: string, count: number): void {
+    this.activeContainers.set({ language, template }, count);
+  }
+
+  // Method to record security events
+  public recordSecurityEvent(eventType: string, severity: string, source: string): void {
+    this.securityEventsTotal.inc({ event_type: eventType, severity, source });
+  }
+
+  // Method to record user actions
+  public recordUserAction(action: string, userId: string): void {
+    this.userActionsTotal.inc({ action, user_id: userId });
+  }
+
+  // Method to record business metrics
+  public recordProjectCreation(template: string, userTier: string): void {
+    this.projectsCreatedTotal.inc({ template, user_tier: userTier });
+  }
+
+  public recordDeployment(status: string, environment: string, template: string): void {
+    this.deploymentsTotal.inc({ status, environment, template });
+  }
+
+  public recordRevenue(amount: number, plan: string, paymentMethod: string): void {
+    this.revenueTotal.inc({ plan, payment_method: paymentMethod }, amount);
+  }
+
+  // Method to get metrics for Prometheus endpoint
+  public async getMetrics(): Promise<string> {
+    return await register.metrics();
+  }
+
+  // Method to get metrics in JSON format
+  public async getMetricsAsJson(): Promise<any> {
+    const metrics = await register.getMetricsAsJSON();
+    return metrics;
+  }
+
+  // Method to clear all metrics (useful for testing)
+  public clearMetrics(): void {
+    register.clear();
+  }
+
+  // Method to create custom metric
+  public createCustomCounter(name: string, help: string, labelNames: string[] = []): Counter<string> {
+    return new Counter({ name, help, labelNames });
+  }
+
+  public createCustomGauge(name: string, help: string, labelNames: string[] = []): Gauge<string> {
+    return new Gauge({ name, help, labelNames });
+  }
+
+  public createCustomHistogram(name: string, help: string, labelNames: string[] = [], buckets?: number[]): Histogram<string> {
+    return new Histogram({ name, help, labelNames, buckets });
+  }
+
+  // Health check endpoint for metrics system
+  public healthCheck(): { status: string; metrics_count: number; memory_usage: number } {
+    const metricsCount = register.getSingleMetric('prometheus_registry_metrics_total');
+    const memoryUsage = process.memoryUsage();
     
     return {
-      count: values.length,
-      sum,
-      avg: sum / values.length,
-      min: sorted[0],
-      max: sorted[sorted.length - 1],
-      p50: sorted[Math.floor(sorted.length * 0.5)],
-      p95: sorted[Math.floor(sorted.length * 0.95)],
-      p99: sorted[Math.floor(sorted.length * 0.99)],
+      status: 'healthy',
+      metrics_count: Array.from(register.getMetricsAsArray()).length,
+      memory_usage: memoryUsage.heapUsed
     };
   }
 }
 
-// Global metrics instance
-export const metrics = MetricsCollector.getInstance();
+// Export singleton instance
+export const metricsCollector = new MetricsCollector();
 
-// Start collecting system metrics every 30 seconds
-if (typeof process !== 'undefined') {
-  setInterval(() => {
-    metrics.recordSystemMetrics();
-  }, 30000);
-}
+// Export types
+export { MetricsCollector };
+export default metricsCollector;

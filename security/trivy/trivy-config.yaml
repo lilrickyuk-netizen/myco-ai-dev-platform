@@ -1,0 +1,64 @@
+# Trivy Configuration for AI Development Platform
+format: json
+output: security/reports/trivy/
+
+# Scan settings
+severity:
+  - UNKNOWN
+  - LOW
+  - MEDIUM
+  - HIGH
+  - CRITICAL
+
+# Exit code configuration
+exit-code: 1
+exit-on-eol: 1
+
+# Vulnerability settings
+vuln-type:
+  - os
+  - library
+
+# Security checks
+security-checks:
+  - vuln
+  - config
+  - secret
+
+# Cache settings
+cache-dir: /tmp/trivy-cache
+
+# Timeout settings
+timeout: 10m
+
+# Skip specific checks
+skip-files:
+  - "**/*.test.js"
+  - "**/*.test.ts"
+  - "**/*.spec.js"
+  - "**/*.spec.ts"
+  - "**/node_modules/**"
+  - "**/coverage/**"
+  - "**/dist/**"
+  - "**/build/**"
+
+# Ignore unfixed vulnerabilities
+ignore-unfixed: false
+
+# Custom policies
+policy: security/trivy/policies/
+
+# Database settings
+skip-db-update: false
+light: false
+
+# Output settings
+list-all-pkgs: true
+dependency-tree: true
+
+# Misconfiguration scanning
+config-policy: security/trivy/policies/config
+config-data: security/trivy/policies/data
+
+# Secret scanning
+secret-config: security/trivy/policies/secret

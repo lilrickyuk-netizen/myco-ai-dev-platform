@@ -1,0 +1,394 @@
+# Fluentd configuration for comprehensive log aggregation
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: monitoring
+data:
+  fluent.conf: |
+    # Input sources
+    <source>
+      @type kubernetes_metadata_filter
+      @id kubernetes_metadata_filter
+      kubernetes_url "#{ENV['KUBERNETES_SERVICE_HOST']}:#{ENV['KUBERNETES_SERVICE_PORT_HTTPS']}"
+      verify_ssl "#{ENV['KUBERNETES_VERIFY_SSL'] || true}"
+      ca_file "#{ENV['KUBERNETES_CA_FILE']}"
+      skip_labels false
+      skip_container_metadata false
+      skip_master_url false
+      skip_namespace_metadata false
+    </source>
+
+    <source>
+      @type tail
+      @id application_logs
+      path /var/log/containers/*ai-dev-platform*.log
+      pos_file /var/log/fluentd-containers-aidev.log.pos
+      tag kubernetes.*
+      read_from_head true
+      <parse>
+        @type multi_format
+        <pattern>
+          format json
+          time_key time
+          time_format %Y-%m-%dT%H:%M:%S.%NZ
+        </pattern>
+        <pattern>
+          format /^(?<time>.+) (?<stream>stdout|stderr) [^ ]* (?<log>.*)$/
+          time_format %Y-%m-%dT%H:%M:%S.%N%:z
+        </pattern>
+      </parse>
+    </source>
+
+    <source>
+      @type tail
+      @id nginx_access_logs
+      path /var/log/containers/*frontend*.log
+      pos_file /var/log/fluentd-nginx-access.log.pos
+      tag kubernetes.nginx.access
+      read_from_head true
+      <parse>
+        @type nginx
+      </parse>
+    </source>
+
+    <source>
+      @type tail
+      @id postgres_logs
+      path /var/log/containers/*postgres*.log
+      pos_file /var/log/fluentd-postgres.log.pos
+      tag kubernetes.postgres
+      read_from_head true
+      <parse>
+        @type multi_format
+        <pattern>
+          format /^(?<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3} \w+) \[(?<pid>\d+)\] (?<level>\w+):  (?<message>.*)$/
+          time_format %Y-%m-%d %H:%M:%S.%L %Z
+        </pattern>
+        <pattern>
+          format none
+        </pattern>
+      </parse>
+    </source>
+
+    # Filters for log processing
+    <filter kubernetes.**>
+      @type kubernetes_metadata
+      @id kubernetes_metadata
+      kubernetes_url "#{ENV['KUBERNETES_SERVICE_HOST']}:#{ENV['KUBERNETES_SERVICE_PORT_HTTPS']}"
+      verify_ssl "#{ENV['KUBERNETES_VERIFY_SSL'] || true}"
+      ca_file "#{ENV['KUBERNETES_CA_FILE']}"
+      skip_labels false
+      skip_container_metadata false
+      skip_master_url false
+      skip_namespace_metadata false
+    </filter>
+
+    # Enhance logs with additional metadata
+    <filter kubernetes.**>
+      @type record_transformer
+      @id add_metadata
+      <record>
+        cluster_name "#{ENV['CLUSTER_NAME'] || 'ai-dev-platform'}"
+        environment "#{ENV['ENVIRONMENT'] || 'development'}"
+        region "#{ENV['AWS_REGION'] || 'us-west-2'}"
+        timestamp ${time}
+      </record>
+    </filter>
+
+    # Parse JSON logs from applications
+    <filter kubernetes.**>
+      @type parser
+      @id parse_json_logs
+      key_name log
+      reserve_data true
+      remove_key_name_field true
+      emit_invalid_record_to_error false
+      <parse>
+        @type json
+      </parse>
+    </filter>
+
+    # Extract and normalize log levels
+    <filter kubernetes.**>
+      @type record_transformer
+      @id normalize_log_level
+      <record>
+        level ${record.dig("level") || record.dig("severity") || "info"}
+      </record>
+    </filter>
+
+    # Add security context
+    <filter kubernetes.**>
+      @type record_transformer
+      @id add_security_context
+      <record>
+        security_context {
+          "namespace": "${record.dig('kubernetes', 'namespace_name')}",
+          "pod_name": "${record.dig('kubernetes', 'pod_name')}",
+          "container_name": "${record.dig('kubernetes', 'container_name')}",
+          "pod_ip": "${record.dig('kubernetes', 'pod_ip')}"
+        }
+      </record>
+    </filter>
+
+    # Route logs based on namespace and application
+    <match kubernetes.var.log.containers.**kube-system**.log>
+      @type null
+      @id ignore_kube_system
+    </match>
+
+    <match kubernetes.var.log.containers.**kube-public**.log>
+      @type null
+      @id ignore_kube_public
+    </match>
+
+    # Application logs routing
+    <match kubernetes.**>
+      @type copy
+      <store>
+        @type elasticsearch
+        @id elasticsearch_output
+        host "#{ENV['ELASTICSEARCH_HOST'] || 'elasticsearch.monitoring.svc.cluster.local'}"
+        port "#{ENV['ELASTICSEARCH_PORT'] || '9200'}"
+        user "#{ENV['ELASTICSEARCH_USER'] || 'elastic'}"
+        password "#{ENV['ELASTICSEARCH_PASSWORD'] || 'changeme'}"
+        scheme "#{ENV['ELASTICSEARCH_SCHEME'] || 'http'}"
+        ssl_verify "#{ENV['ELASTICSEARCH_SSL_VERIFY'] || 'false'}"
+        
+        index_name "ai-dev-platform-logs-${record['kubernetes']['namespace_name']}-${Time.at(time).strftime('%Y.%m.%d')}"
+        type_name "_doc"
+        
+        suppress_type_name true
+        reload_connections false
+        reconnect_on_error true
+        reload_on_failure true
+        
+        <buffer>
+          @type file
+          path /var/log/fluentd-buffers/kubernetes.system.buffer
+          flush_mode interval
+          retry_type exponential_backoff
+          flush_thread_count 2
+          flush_interval 5s
+          retry_forever
+          retry_max_interval 30
+          chunk_limit_size 2M
+          queue_limit_length 8
+          overflow_action block
+        </buffer>
+      </store>
+      
+      <store>
+        @type cloudwatch_logs
+        @id cloudwatch_output
+        region "#{ENV['AWS_REGION'] || 'us-west-2'}"
+        log_group_name "/aws/kubernetes/ai-dev-platform"
+        log_stream_name "${record['kubernetes']['namespace_name']}-${record['kubernetes']['pod_name']}-${record['kubernetes']['container_name']}"
+        auto_create_stream true
+        
+        <buffer>
+          @type file
+          path /var/log/fluentd-buffers/cloudwatch.buffer
+          flush_mode interval
+          retry_type exponential_backoff
+          flush_thread_count 2
+          flush_interval 10s
+          retry_forever
+          retry_max_interval 60
+          chunk_limit_size 1M
+          queue_limit_length 4
+          overflow_action block
+        </buffer>
+      </store>
+      
+      # Store structured logs in S3 for long-term retention
+      <store>
+        @type s3
+        @id s3_output
+        aws_key_id "#{ENV['AWS_ACCESS_KEY_ID']}"
+        aws_sec_key "#{ENV['AWS_SECRET_ACCESS_KEY']}"
+        s3_bucket "#{ENV['S3_BUCKET_NAME'] || 'ai-dev-platform-logs'}"
+        s3_region "#{ENV['AWS_REGION'] || 'us-west-2'}"
+        path "logs/year=${Time.at(time).strftime('%Y')}/month=${Time.at(time).strftime('%m')}/day=${Time.at(time).strftime('%d')}/hour=${Time.at(time).strftime('%H')}/"
+        s3_object_key_format "%{path}%{time_slice}_%{index}.%{file_extension}"
+        time_slice_format %Y%m%d%H
+        
+        <buffer time>
+          @type file
+          path /var/log/fluentd-buffers/s3.buffer
+          timekey 3600 # 1 hour
+          timekey_wait 10m
+          chunk_limit_size 256m
+        </buffer>
+        
+        <format>
+          @type json
+        </format>
+      </store>
+    </match>
+
+    # Security and audit logs
+    <match kubernetes.var.log.containers.**security**.log>
+      @type copy
+      <store>
+        @type elasticsearch
+        @id security_elasticsearch
+        host "#{ENV['ELASTICSEARCH_HOST'] || 'elasticsearch.monitoring.svc.cluster.local'}"
+        port "#{ENV['ELASTICSEARCH_PORT'] || '9200'}"
+        index_name "security-logs-${Time.at(time).strftime('%Y.%m.%d')}"
+        type_name "_doc"
+      </store>
+      
+      <store>
+        @type file
+        @id security_file_backup
+        path /var/log/security-logs/security.%Y%m%d.log
+        symlink_path /var/log/security-logs/security.log
+        <format>
+          @type json
+        </format>
+      </store>
+    </match>
+
+    # Error logs - special handling
+    <filter kubernetes.**>
+      @type grep
+      @id filter_errors
+      <regexp>
+        key level
+        pattern ^(error|ERROR|fatal|FATAL|panic|PANIC)$
+      </regexp>
+    </filter>
+
+    # Performance logs
+    <filter kubernetes.**>
+      @type parser
+      @id parse_performance_metrics
+      key_name log
+      reserve_data true
+      emit_invalid_record_to_error false
+      <parse>
+        @type regexp
+        expression /^.*response_time:(?<response_time>\d+)ms.*memory_usage:(?<memory_usage>\d+)MB.*cpu_usage:(?<cpu_usage>\d+\.\d+)%/
+      </parse>
+    </filter>
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd
+  namespace: monitoring
+  labels:
+    app: fluentd
+spec:
+  selector:
+    matchLabels:
+      app: fluentd
+  template:
+    metadata:
+      labels:
+        app: fluentd
+    spec:
+      serviceAccountName: fluentd
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule
+      containers:
+      - name: fluentd
+        image: fluent/fluentd-kubernetes-daemonset:v1-debian-elasticsearch
+        env:
+        - name: ELASTICSEARCH_HOST
+          value: "elasticsearch.monitoring.svc.cluster.local"
+        - name: ELASTICSEARCH_PORT
+          value: "9200"
+        - name: CLUSTER_NAME
+          value: "ai-dev-platform"
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: cluster-config
+              key: environment
+              optional: true
+        resources:
+          limits:
+            memory: 512Mi
+            cpu: 200m
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: fluentd-config
+          mountPath: /fluentd/etc/fluent.conf
+          subPath: fluent.conf
+        - name: buffer-storage
+          mountPath: /var/log/fluentd-buffers
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: false # Needs root to read log files
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - DAC_OVERRIDE
+            - CHOWN
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: fluentd-config
+        configMap:
+          name: fluentd-config
+      - name: buffer-storage
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluentd
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fluentd
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fluentd
+roleRef:
+  kind: ClusterRole
+  name: fluentd
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: fluentd
+  namespace: monitoring

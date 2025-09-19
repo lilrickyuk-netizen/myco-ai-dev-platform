@@ -1,0 +1,28 @@
+# Snyk ignore file
+# This file contains package vulnerabilities that can be ignored
+
+# Global ignores
+# version: v1.0.0
+
+# Ignore specific vulnerabilities with justification
+# Example:
+# ignore:
+#   'SNYK-JS-LODASH-567746':
+#     - lodash:
+#       reason: Low severity, used only in development
+#       expires: '2024-12-31T23:59:59.999Z'
+
+# Development dependencies ignores
+# These are typically safe to ignore in production builds
+ignore:
+  # Development-only packages
+  'SNYK-JS-MINIMIST-559764':
+    - '*':
+        reason: Used only in development scripts
+        expires: '2024-12-31T23:59:59.999Z'
+
+# Language-specific settings
+language-settings:
+  javascript:
+    # Ignore devDependencies in production scanning
+    ignoreDevDependencies: true

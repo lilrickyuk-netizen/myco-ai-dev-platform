@@ -1,450 +1,423 @@
-import { test, expect } from '@playwright/test';
+/**
+ * End-to-End Test Suite for AI Development Platform
+ * Tests complete user workflow: create → run → deploy project
+ */
 
-test.describe('Complete User Workflow', () => {
-  test.beforeEach(async ({ page }) => {
-    // Mock authentication for all tests
-    await page.addInitScript(() => {
-      (window as any).__clerk_publishable_key = 'pk_test_mock_key_for_testing';
-      (window as any).__clerk_frontend_api = 'clerk.mock.test';
+import { test, expect, Page } from '@playwright/test';
+
+// Test configuration
+const TEST_CONFIG = {
+  baseUrl: process.env.TEST_BASE_URL || 'http://localhost:3000',
+  apiUrl: process.env.TEST_API_URL || 'http://localhost:3001',
+  timeout: 60000,
+  slowMo: process.env.CI ? 0 : 100,
+  headless: process.env.CI ? true : false
+};
+
+// Test user credentials
+const TEST_USER = {
+  email: `test-user-${Date.now()}@example.com`,
+  password: 'TestPassword123!',
+  name: 'Test User'
+};
+
+// Project configuration for testing
+const TEST_PROJECT = {
+  name: `test-project-${Date.now()}`,
+  description: 'End-to-end test project',
+  template: 'react-typescript',
+  language: 'typescript'
+};
+
+test.describe('AI Development Platform - Complete Workflow', () => {
+  let page: Page;
+
+  test.beforeAll(async ({ browser }) => {
+    page = await browser.newPage();
+    await page.goto(TEST_CONFIG.baseUrl);
+  });
+
+  test.afterAll(async () => {
+    await page.close();
+  });
+
+  test.describe('User Authentication Flow', () => {
+    test('should display landing page correctly', async () => {
+      await expect(page).toHaveTitle(/AI Development Platform/);
+      await expect(page.locator('h1')).toContainText('AI Development Platform');
       
-      // Mock user session
-      (window as any).__clerk_user = {
-        id: 'test_user_123',
-        firstName: 'Test',
-        lastName: 'User',
-        emailAddresses: [{ emailAddress: 'test@example.com' }],
-        imageUrl: 'https://example.com/avatar.jpg'
-      };
+      // Check for key elements
+      await expect(page.locator('[data-testid="login-button"]')).toBeVisible();
+      await expect(page.locator('[data-testid="signup-button"]')).toBeVisible();
     });
 
-    // Mock backend API responses
-    await page.route('**/api/**', (route) => {
-      const url = route.request().url();
+    test('should allow user registration', async () => {
+      // Click sign up button
+      await page.click('[data-testid="signup-button"]');
       
-      if (url.includes('/projects/list')) {
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            projects: [
-              {
-                id: 'proj_001',
-                name: 'E2E Test Project',
-                description: 'Test project for E2E testing',
-                ownerId: 'test_user_123',
-                visibility: 'private',
-                status: 'active',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                techStack: ['React', 'TypeScript', 'Node.js'],
-                metadata: {}
-              }
-            ],
-            total: 1
-          })
-        });
-      } else if (url.includes('/projects/create')) {
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            id: 'proj_new_001',
-            name: 'New Test Project',
-            description: 'Newly created test project',
-            ownerId: 'test_user_123',
-            visibility: 'private',
-            status: 'active',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            techStack: ['React', 'TypeScript'],
-            metadata: {}
-          })
-        });
-      } else if (url.includes('/filesystem/')) {
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            files: [
-              {
-                id: 'file_001',
-                name: 'src',
-                path: '/src',
-                type: 'directory',
-                children: [
-                  {
-                    id: 'file_002',
-                    name: 'App.tsx',
-                    path: '/src/App.tsx',
-                    type: 'file',
-                    content: 'import React from "react";\n\nfunction App() {\n  return <div>Hello World</div>;\n}\n\nexport default App;',
-                    size: 95,
-                    lastModified: new Date().toISOString()
-                  }
-                ]
-              }
-            ]
-          })
-        });
-      } else if (url.includes('/ai/generate')) {
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            content: 'Here is a React component example:\n\n```tsx\nfunction Button({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {\n  return (\n    <button onClick={onClick} className="btn">\n      {children}\n    </button>\n  );\n}\n```',
-            usage: {
-              promptTokens: 15,
-              completionTokens: 45,
-              totalTokens: 60
-            }
-          })
-        });
-      } else {
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ success: true })
-        });
+      // Fill registration form
+      await page.fill('[data-testid="signup-email"]', TEST_USER.email);
+      await page.fill('[data-testid="signup-password"]', TEST_USER.password);
+      await page.fill('[data-testid="signup-name"]', TEST_USER.name);
+      
+      // Submit registration
+      await page.click('[data-testid="signup-submit"]');
+      
+      // Wait for successful registration
+      await expect(page.locator('[data-testid="welcome-message"]')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('[data-testid="dashboard"]')).toBeVisible();
+    });
+
+    test('should navigate to dashboard after registration', async () => {
+      await expect(page).toHaveURL(new RegExp('/dashboard'));
+      await expect(page.locator('[data-testid="user-profile"]')).toContainText(TEST_USER.name);
+      
+      // Check dashboard elements
+      await expect(page.locator('[data-testid="create-project-button"]')).toBeVisible();
+      await expect(page.locator('[data-testid="projects-list"]')).toBeVisible();
+    });
+  });
+
+  test.describe('Project Creation and Management', () => {
+    test('should create a new project', async () => {
+      // Click create project button
+      await page.click('[data-testid="create-project-button"]');
+      
+      // Wait for create project modal
+      await expect(page.locator('[data-testid="create-project-modal"]')).toBeVisible();
+      
+      // Fill project details
+      await page.fill('[data-testid="project-name"]', TEST_PROJECT.name);
+      await page.fill('[data-testid="project-description"]', TEST_PROJECT.description);
+      
+      // Select template
+      await page.click('[data-testid="template-selector"]');
+      await page.click(`[data-testid="template-${TEST_PROJECT.template}"]`);
+      
+      // Create project
+      await page.click('[data-testid="create-project-submit"]');
+      
+      // Wait for project creation and navigation to IDE
+      await expect(page.locator('[data-testid="ide-container"]')).toBeVisible({ timeout: 15000 });
+      await expect(page).toHaveURL(new RegExp(`/projects/${TEST_PROJECT.name}`));
+    });
+
+    test('should display project IDE interface', async () => {
+      // Check IDE components
+      await expect(page.locator('[data-testid="file-explorer"]')).toBeVisible();
+      await expect(page.locator('[data-testid="code-editor"]')).toBeVisible();
+      await expect(page.locator('[data-testid="terminal"]')).toBeVisible();
+      await expect(page.locator('[data-testid="ai-assistant"]')).toBeVisible();
+      
+      // Check file explorer has initial files
+      await expect(page.locator('[data-testid="file-explorer"] [data-testid="file-item"]')).toHaveCount.atLeast(1);
+    });
+
+    test('should load project files in editor', async () => {
+      // Click on a file in file explorer
+      const firstFile = page.locator('[data-testid="file-explorer"] [data-testid="file-item"]').first();
+      await firstFile.click();
+      
+      // Verify editor loads file content
+      await expect(page.locator('[data-testid="code-editor"]')).not.toBeEmpty();
+      
+      // Check syntax highlighting is working
+      await expect(page.locator('[data-testid="code-editor"] .monaco-editor')).toBeVisible();
+    });
+  });
+
+  test.describe('AI Assistant Integration', () => {
+    test('should interact with AI assistant', async () => {
+      // Open AI assistant panel
+      await page.click('[data-testid="ai-assistant-toggle"]');
+      await expect(page.locator('[data-testid="ai-chat-container"]')).toBeVisible();
+      
+      // Send a message to AI
+      const testMessage = 'Help me create a simple React component';
+      await page.fill('[data-testid="ai-chat-input"]', testMessage);
+      await page.click('[data-testid="ai-chat-send"]');
+      
+      // Wait for AI response
+      await expect(page.locator('[data-testid="ai-message"]').last()).toBeVisible({ timeout: 30000 });
+      
+      // Verify response contains code
+      const aiResponse = await page.locator('[data-testid="ai-message"]').last().textContent();
+      expect(aiResponse).toMatch(/(component|function|jsx|tsx)/i);
+    });
+
+    test('should apply AI suggestions to code', async () => {
+      // Look for apply button in AI response
+      const applyButton = page.locator('[data-testid="apply-ai-suggestion"]').last();
+      
+      if (await applyButton.isVisible()) {
+        await applyButton.click();
+        
+        // Verify code was applied to editor
+        await expect(page.locator('[data-testid="code-editor"]')).toContainText('component');
       }
     });
   });
 
-  test('should complete full project creation and development workflow', async ({ page }) => {
-    // 1. Navigate to dashboard
-    await page.goto('/');
-    
-    // Wait for dashboard to load
-    await expect(page.locator('[data-testid="dashboard"]')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('h1')).toContainText('Projects');
-
-    // 2. Create new project
-    await page.click('[data-testid="create-project-button"]');
-    
-    // Fill project creation form
-    await page.fill('[data-testid="project-name-input"]', 'E2E Test Project');
-    await page.fill('[data-testid="project-description-input"]', 'Project created via E2E test');
-    
-    // Select React TypeScript template
-    await page.click('[data-testid="template-react-typescript"]');
-    
-    // Submit project creation
-    await page.click('[data-testid="create-project-submit"]');
-    
-    // Should navigate to IDE
-    await expect(page).toHaveURL(/.*\/ide\/.*/);
-
-    // 3. Wait for IDE to fully load
-    await expect(page.locator('[data-testid="file-explorer"]')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('[data-testid="code-editor"]')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('[data-testid="ai-assistant"]')).toBeVisible({ timeout: 15000 });
-
-    // 4. Interact with file explorer
-    await page.click('[data-testid="file-explorer"] text=src');
-    await expect(page.locator('text=App.tsx')).toBeVisible();
-    
-    // Open App.tsx file
-    await page.click('text=App.tsx');
-    
-    // 5. Verify code editor shows file content
-    await expect(page.locator('[data-testid="code-editor"]')).toContainText('import React');
-    await expect(page.locator('[data-testid="code-editor"]')).toContainText('Hello World');
-
-    // 6. Use AI assistant
-    await page.fill('[data-testid="ai-chat-input"]', 'Create a button component');
-    await page.press('[data-testid="ai-chat-input"]', 'Enter');
-    
-    // Wait for AI response
-    await expect(page.locator('[data-testid="ai-messages"]')).toContainText('React component example', { timeout: 10000 });
-    await expect(page.locator('[data-testid="ai-messages"]')).toContainText('function Button');
-
-    // 7. Insert AI-generated code
-    await page.click('[data-testid="ai-code-insert-button"]');
-    
-    // Verify code was inserted
-    await expect(page.locator('[data-testid="code-editor"]')).toContainText('function Button');
-
-    // 8. Save file
-    await page.keyboard.press('Control+S');
-    await expect(page.locator('[data-testid="save-success"]')).toBeVisible({ timeout: 5000 });
-
-    // 9. Create new file
-    await page.click('[data-testid="file-explorer-new-file"]');
-    await page.fill('[data-testid="new-file-name"]', 'Button.tsx');
-    await page.press('[data-testid="new-file-name"]', 'Enter');
-    
-    // Verify new file appears in explorer
-    await expect(page.locator('text=Button.tsx')).toBeVisible();
-
-    // 10. Test terminal functionality
-    await page.click('[data-testid="terminal-tab"]');
-    await expect(page.locator('[data-testid="terminal"]')).toBeVisible();
-    
-    // Type command in terminal
-    await page.type('[data-testid="terminal-input"]', 'npm run build');
-    await page.press('[data-testid="terminal-input"]', 'Enter');
-
-    // 11. Test collaboration features
-    await page.click('[data-testid="collaboration-panel"]');
-    await expect(page.locator('[data-testid="collaboration-status"]')).toContainText('Connected');
-
-    // 12. Navigate back to dashboard
-    await page.click('[data-testid="home-button"]');
-    await expect(page).toHaveURL('/');
-    
-    // Verify project appears in dashboard
-    await expect(page.locator('[data-testid="project-grid"]')).toContainText('E2E Test Project');
-  });
-
-  test('should handle project settings and configuration', async ({ page }) => {
-    // Navigate to dashboard and select existing project
-    await page.goto('/');
-    await page.click('[data-testid="project-settings-proj_001"]');
-    
-    // Should navigate to settings page
-    await expect(page).toHaveURL(/.*\/project\/proj_001\/settings/);
-    
-    // Test general settings
-    await page.fill('[data-testid="project-name-input"]', 'Updated Project Name');
-    await page.fill('[data-testid="project-description-input"]', 'Updated description');
-    
-    // Test tech stack configuration
-    await page.click('[data-testid="tech-stack-add"]');
-    await page.selectOption('[data-testid="tech-stack-select"]', 'Express.js');
-    await page.click('[data-testid="tech-stack-confirm"]');
-    
-    // Verify tech stack was added
-    await expect(page.locator('[data-testid="tech-stack-list"]')).toContainText('Express.js');
-    
-    // Test environment variables
-    await page.click('[data-testid="env-vars-tab"]');
-    await page.click('[data-testid="add-env-var"]');
-    await page.fill('[data-testid="env-var-key"]', 'API_URL');
-    await page.fill('[data-testid="env-var-value"]', 'https://api.example.com');
-    await page.click('[data-testid="env-var-save"]');
-    
-    // Verify environment variable was added
-    await expect(page.locator('[data-testid="env-vars-list"]')).toContainText('API_URL');
-    
-    // Test deployment settings
-    await page.click('[data-testid="deployment-tab"]');
-    await page.selectOption('[data-testid="deployment-provider"]', 'vercel');
-    await page.fill('[data-testid="deployment-config"]', '{"framework": "nextjs"}');
-    
-    // Save all settings
-    await page.click('[data-testid="save-settings"]');
-    await expect(page.locator('[data-testid="settings-saved"]')).toBeVisible();
-  });
-
-  test('should handle error scenarios gracefully', async ({ page }) => {
-    // Mock API errors for this test
-    await page.route('**/api/projects/create', (route) => {
-      route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: 'Internal server error' })
-      });
+  test.describe('Code Execution and Testing', () => {
+    test('should execute code in terminal', async () => {
+      // Focus terminal
+      await page.click('[data-testid="terminal"]');
+      
+      // Execute a simple command
+      await page.keyboard.type('npm --version');
+      await page.keyboard.press('Enter');
+      
+      // Wait for command output
+      await expect(page.locator('[data-testid="terminal-output"]')).toContainText(/\d+\.\d+\.\d+/, { timeout: 10000 });
     });
-    
-    await page.goto('/');
-    
-    // Try to create project that will fail
-    await page.click('[data-testid="create-project-button"]');
-    await page.fill('[data-testid="project-name-input"]', 'Failing Project');
-    await page.click('[data-testid="create-project-submit"]');
-    
-    // Should show error message
-    await expect(page.locator('[data-testid="error-message"]')).toBeVisible();
-    await expect(page.locator('[data-testid="error-message"]')).toContainText('Internal server error');
-    
-    // Should remain on dashboard
-    await expect(page).toHaveURL('/');
-  });
 
-  test('should support collaborative editing', async ({ page, context }) => {
-    // Create second browser context to simulate another user
-    const secondContext = await context.browser()?.newContext();
-    const secondPage = await secondContext?.newPage();
-    
-    if (!secondPage) return;
-    
-    // Setup same mocks for second page
-    await secondPage.addInitScript(() => {
-      (window as any).__clerk_publishable_key = 'pk_test_mock_key_for_testing';
-      (window as any).__clerk_user = {
-        id: 'test_user_456',
-        firstName: 'Second',
-        lastName: 'User',
-        emailAddresses: [{ emailAddress: 'second@example.com' }]
-      };
+    test('should run project build', async () => {
+      // Click run/build button
+      await page.click('[data-testid="run-project-button"]');
+      
+      // Wait for build to start
+      await expect(page.locator('[data-testid="build-status"]')).toContainText('Building...', { timeout: 5000 });
+      
+      // Wait for build to complete
+      await expect(page.locator('[data-testid="build-status"]')).toContainText(/Build (completed|successful)/, { timeout: 60000 });
     });
-    
-    // Both users navigate to same project
-    await page.goto('/ide/proj_001');
-    await secondPage.goto('/ide/proj_001');
-    
-    // Wait for both IDEs to load
-    await expect(page.locator('[data-testid="code-editor"]')).toBeVisible();
-    await expect(secondPage.locator('[data-testid="code-editor"]')).toBeVisible();
-    
-    // First user makes changes
-    await page.locator('[data-testid="code-editor"] textarea').fill('console.log("Hello from user 1");');
-    
-    // Second user should see the changes (in real implementation)
-    // For now, we'll just verify the collaboration panel shows connected users
-    await expect(page.locator('[data-testid="collaboration-users"]')).toContainText('2 users');
-    await expect(secondPage.locator('[data-testid="collaboration-users"]')).toContainText('2 users');
-    
-    await secondContext?.close();
+
+    test('should preview running application', async () => {
+      // Check if preview is available
+      const previewButton = page.locator('[data-testid="preview-button"]');
+      
+      if (await previewButton.isVisible()) {
+        await previewButton.click();
+        
+        // Wait for preview iframe or new tab
+        const previewFrame = page.locator('[data-testid="preview-iframe"]');
+        if (await previewFrame.isVisible()) {
+          await expect(previewFrame).toBeVisible();
+        }
+      }
+    });
   });
 
-  test('should handle file operations comprehensively', async ({ page }) => {
-    await page.goto('/ide/proj_001');
-    
-    // Wait for file explorer to load
-    await expect(page.locator('[data-testid="file-explorer"]')).toBeVisible();
-    
-    // Test creating folder
-    await page.click('[data-testid="file-explorer-new-folder"]');
-    await page.fill('[data-testid="new-folder-name"]', 'components');
-    await page.press('[data-testid="new-folder-name"]', 'Enter');
-    
-    await expect(page.locator('text=components')).toBeVisible();
-    
-    // Test creating file in folder
-    await page.click('text=components');
-    await page.click('[data-testid="folder-context-menu"]');
-    await page.click('[data-testid="new-file-in-folder"]');
-    await page.fill('[data-testid="new-file-name"]', 'Header.tsx');
-    await page.press('[data-testid="new-file-name"]', 'Enter');
-    
-    await expect(page.locator('text=Header.tsx')).toBeVisible();
-    
-    // Test file renaming
-    await page.click('[data-testid="file-context-menu-Header.tsx"]');
-    await page.click('[data-testid="rename-file"]');
-    await page.fill('[data-testid="rename-input"]', 'Navigation.tsx');
-    await page.press('[data-testid="rename-input"]', 'Enter');
-    
-    await expect(page.locator('text=Navigation.tsx')).toBeVisible();
-    await expect(page.locator('text=Header.tsx')).not.toBeVisible();
-    
-    // Test file deletion
-    await page.click('[data-testid="file-context-menu-Navigation.tsx"]');
-    await page.click('[data-testid="delete-file"]');
-    await page.click('[data-testid="confirm-delete"]');
-    
-    await expect(page.locator('text=Navigation.tsx')).not.toBeVisible();
+  test.describe('Project Collaboration and Sharing', () => {
+    test('should save project changes', async () => {
+      // Make a change in the editor
+      await page.click('[data-testid="code-editor"]');
+      await page.keyboard.press('End');
+      await page.keyboard.type('\n// Test comment added');
+      
+      // Save the file
+      await page.keyboard.press('Control+S');
+      
+      // Verify save indication
+      await expect(page.locator('[data-testid="save-status"]')).toContainText(/saved|updated/i, { timeout: 5000 });
+    });
+
+    test('should share project', async () => {
+      // Open share modal
+      await page.click('[data-testid="share-project-button"]');
+      await expect(page.locator('[data-testid="share-modal"]')).toBeVisible();
+      
+      // Generate share link
+      await page.click('[data-testid="generate-share-link"]');
+      
+      // Copy share link
+      const shareLink = await page.locator('[data-testid="share-link"]').textContent();
+      expect(shareLink).toMatch(/^https?:\/\/.+/);
+    });
   });
 
-  test('should support search and replace functionality', async ({ page }) => {
-    await page.goto('/ide/proj_001');
-    
-    // Open a file with content
-    await page.click('text=App.tsx');
-    
-    // Open search dialog
-    await page.keyboard.press('Control+F');
-    await expect(page.locator('[data-testid="search-dialog"]')).toBeVisible();
-    
-    // Search for text
-    await page.fill('[data-testid="search-input"]', 'Hello World');
-    await expect(page.locator('[data-testid="search-results"]')).toContainText('1 result');
-    
-    // Replace text
-    await page.click('[data-testid="replace-toggle"]');
-    await page.fill('[data-testid="replace-input"]', 'Hello Universe');
-    await page.click('[data-testid="replace-all"]');
-    
-    // Verify replacement
-    await expect(page.locator('[data-testid="code-editor"]')).toContainText('Hello Universe');
-    await expect(page.locator('[data-testid="code-editor"]')).not.toContainText('Hello World');
-    
-    // Close search dialog
-    await page.keyboard.press('Escape');
-    await expect(page.locator('[data-testid="search-dialog"]')).not.toBeVisible();
+  test.describe('Deployment Workflow', () => {
+    test('should access deployment settings', async () => {
+      // Open deployment panel
+      await page.click('[data-testid="deploy-button"]');
+      await expect(page.locator('[data-testid="deployment-modal"]')).toBeVisible();
+      
+      // Check deployment options
+      await expect(page.locator('[data-testid="deployment-platform-selector"]')).toBeVisible();
+      await expect(page.locator('[data-testid="deployment-config"]')).toBeVisible();
+    });
+
+    test('should configure deployment settings', async () => {
+      // Select deployment platform
+      await page.click('[data-testid="deployment-platform-selector"]');
+      await page.click('[data-testid="platform-vercel"]'); // or another platform
+      
+      // Configure deployment settings
+      const deploymentName = `${TEST_PROJECT.name}-deploy`;
+      await page.fill('[data-testid="deployment-name"]', deploymentName);
+      
+      // Set environment variables if needed
+      const envVarSection = page.locator('[data-testid="environment-variables"]');
+      if (await envVarSection.isVisible()) {
+        await page.click('[data-testid="add-env-var"]');
+        await page.fill('[data-testid="env-var-key"]', 'NODE_ENV');
+        await page.fill('[data-testid="env-var-value"]', 'production');
+      }
+    });
+
+    test('should initiate deployment', async () => {
+      // Start deployment
+      await page.click('[data-testid="start-deployment"]');
+      
+      // Wait for deployment to start
+      await expect(page.locator('[data-testid="deployment-status"]')).toContainText('Deploying...', { timeout: 10000 });
+      
+      // Monitor deployment progress
+      const deploymentProgress = page.locator('[data-testid="deployment-progress"]');
+      await expect(deploymentProgress).toBeVisible();
+      
+      // Wait for deployment completion (with longer timeout)
+      await expect(page.locator('[data-testid="deployment-status"]')).toContainText(/deployed|success/i, { timeout: 300000 });
+    });
+
+    test('should verify deployed application', async () => {
+      // Get deployment URL
+      const deploymentUrl = await page.locator('[data-testid="deployment-url"]').textContent();
+      expect(deploymentUrl).toMatch(/^https?:\/\/.+/);
+      
+      // Open deployment URL in new tab
+      const [newPage] = await Promise.all([
+        page.context().waitForEvent('page'),
+        page.click('[data-testid="open-deployment"]')
+      ]);
+      
+      // Verify deployed app loads
+      await expect(newPage).toHaveTitle(/.*/, { timeout: 30000 });
+      
+      await newPage.close();
+    });
   });
 
-  test('should handle AI assistant conversation flow', async ({ page }) => {
-    await page.goto('/ide/proj_001');
-    
-    // Wait for AI assistant to load
-    await expect(page.locator('[data-testid="ai-assistant"]')).toBeVisible();
-    
-    // Start conversation
-    await page.fill('[data-testid="ai-chat-input"]', 'How do I create a responsive navbar?');
-    await page.press('[data-testid="ai-chat-input"]', 'Enter');
-    
-    // Wait for response
-    await expect(page.locator('[data-testid="ai-messages"]')).toContainText('navbar', { timeout: 10000 });
-    
-    // Continue conversation
-    await page.fill('[data-testid="ai-chat-input"]', 'Can you make it use Tailwind CSS?');
-    await page.press('[data-testid="ai-chat-input"]', 'Enter');
-    
-    // Should show multiple messages
-    const messages = page.locator('[data-testid="ai-message"]');
-    await expect(messages).toHaveCount(3); // System message + 2 responses
-    
-    // Test quick actions
-    await page.click('[data-testid="ai-quick-action-debug"]');
-    await expect(page.locator('[data-testid="ai-chat-input"]')).toHaveValue('Help me debug this issue: ');
-    
-    // Test conversation history
-    await page.click('[data-testid="ai-conversation-history"]');
-    await expect(page.locator('[data-testid="conversation-list"]')).toBeVisible();
+  test.describe('Project Management and Cleanup', () => {
+    test('should return to dashboard', async () => {
+      // Navigate back to dashboard
+      await page.click('[data-testid="dashboard-link"]');
+      await expect(page).toHaveURL(new RegExp('/dashboard'));
+      
+      // Verify project appears in projects list
+      await expect(page.locator(`[data-testid="project-${TEST_PROJECT.name}"]`)).toBeVisible();
+    });
+
+    test('should view project analytics', async () => {
+      // Click on project analytics
+      await page.click(`[data-testid="project-${TEST_PROJECT.name}"] [data-testid="analytics-button"]`);
+      
+      // Verify analytics panel
+      await expect(page.locator('[data-testid="analytics-panel"]')).toBeVisible();
+      
+      // Check for metrics
+      await expect(page.locator('[data-testid="project-views"]')).toBeVisible();
+      await expect(page.locator('[data-testid="deployment-count"]')).toBeVisible();
+    });
+
+    test('should delete test project', async () => {
+      // Navigate to project settings
+      await page.click(`[data-testid="project-${TEST_PROJECT.name}"] [data-testid="settings-button"]`);
+      
+      // Click delete project
+      await page.click('[data-testid="delete-project-button"]');
+      
+      // Confirm deletion
+      await expect(page.locator('[data-testid="delete-confirmation"]')).toBeVisible();
+      await page.fill('[data-testid="delete-confirmation-input"]', TEST_PROJECT.name);
+      await page.click('[data-testid="confirm-delete"]');
+      
+      // Verify project is removed
+      await expect(page.locator(`[data-testid="project-${TEST_PROJECT.name}"]`)).not.toBeVisible();
+    });
   });
 
-  test('should validate form inputs and show appropriate errors', async ({ page }) => {
-    await page.goto('/');
-    
-    // Try to create project with invalid data
-    await page.click('[data-testid="create-project-button"]');
-    
-    // Submit without required fields
-    await page.click('[data-testid="create-project-submit"]');
-    
-    // Should show validation errors
-    await expect(page.locator('[data-testid="project-name-error"]')).toContainText('Project name is required');
-    
-    // Fill invalid name (too short)
-    await page.fill('[data-testid="project-name-input"]', 'ab');
-    await page.click('[data-testid="create-project-submit"]');
-    
-    await expect(page.locator('[data-testid="project-name-error"]')).toContainText('at least 3 characters');
-    
-    // Fill valid data
-    await page.fill('[data-testid="project-name-input"]', 'Valid Project Name');
-    await page.fill('[data-testid="project-description-input"]', 'Valid description');
-    await page.click('[data-testid="template-react-typescript"]');
-    
-    // Should be able to submit now
-    await page.click('[data-testid="create-project-submit"]');
-    await expect(page).toHaveURL(/.*\/ide\/.*/);
+  test.describe('Performance and Accessibility', () => {
+    test('should meet performance benchmarks', async () => {
+      // Navigate to main dashboard
+      await page.goto(`${TEST_CONFIG.baseUrl}/dashboard`);
+      
+      // Measure page load time
+      const startTime = Date.now();
+      await page.waitForLoadState('networkidle');
+      const loadTime = Date.now() - startTime;
+      
+      // Assert reasonable load time (adjust threshold as needed)
+      expect(loadTime).toBeLessThan(5000);
+    });
+
+    test('should be accessible', async () => {
+      // Check for basic accessibility features
+      await expect(page.locator('[role="main"]')).toBeVisible();
+      await expect(page.locator('[aria-label]')).toHaveCount.atLeast(1);
+      
+      // Check for keyboard navigation
+      await page.keyboard.press('Tab');
+      const focusedElement = await page.locator(':focus').getAttribute('data-testid');
+      expect(focusedElement).toBeTruthy();
+    });
   });
 
-  test('should handle keyboard shortcuts', async ({ page }) => {
-    await page.goto('/ide/proj_001');
-    
-    // Wait for IDE to load
-    await expect(page.locator('[data-testid="code-editor"]')).toBeVisible();
-    
-    // Test save shortcut
-    await page.keyboard.press('Control+S');
-    await expect(page.locator('[data-testid="save-status"]')).toContainText('Saved');
-    
-    // Test new file shortcut
-    await page.keyboard.press('Control+N');
-    await expect(page.locator('[data-testid="new-file-dialog"]')).toBeVisible();
-    await page.keyboard.press('Escape');
-    
-    // Test search shortcut
-    await page.keyboard.press('Control+F');
-    await expect(page.locator('[data-testid="search-dialog"]')).toBeVisible();
-    await page.keyboard.press('Escape');
-    
-    // Test command palette
-    await page.keyboard.press('Control+Shift+P');
-    await expect(page.locator('[data-testid="command-palette"]')).toBeVisible();
-    await page.keyboard.press('Escape');
+  test.describe('Error Handling and Edge Cases', () => {
+    test('should handle network errors gracefully', async () => {
+      // Simulate network failure
+      await page.route('**/api/**', route => route.abort());
+      
+      // Try to perform an action that requires API
+      await page.click('[data-testid="create-project-button"]');
+      
+      // Check for error message
+      await expect(page.locator('[data-testid="error-message"]')).toBeVisible({ timeout: 10000 });
+      
+      // Restore network
+      await page.unroute('**/api/**');
+    });
+
+    test('should handle invalid project names', async () => {
+      // Try to create project with invalid name
+      await page.click('[data-testid="create-project-button"]');
+      await page.fill('[data-testid="project-name"]', 'invalid name with spaces and special chars!@#');
+      await page.click('[data-testid="create-project-submit"]');
+      
+      // Check for validation error
+      await expect(page.locator('[data-testid="validation-error"]')).toBeVisible();
+    });
   });
 });
+
+// Utility functions for tests
+export class TestUtils {
+  static async waitForApiResponse(page: Page, url: string, timeout = 30000) {
+    const response = await page.waitForResponse(
+      response => response.url().includes(url) && response.status() === 200,
+      { timeout }
+    );
+    return response;
+  }
+
+  static async takeScreenshot(page: Page, name: string) {
+    await page.screenshot({ 
+      path: `test-results/screenshots/${name}-${Date.now()}.png`,
+      fullPage: true 
+    });
+  }
+
+  static async getConsoleErrors(page: Page): Promise<string[]> {
+    const errors: string[] = [];
+    
+    page.on('console', msg => {
+      if (msg.type() === 'error') {
+        errors.push(msg.text());
+      }
+    });
+    
+    return errors;
+  }
+
+  static async checkNetworkRequests(page: Page, pattern: string): Promise<boolean> {
+    let requestFound = false;
+    
+    page.on('request', request => {
+      if (request.url().includes(pattern)) {
+        requestFound = true;
+      }
+    });
+    
+    return requestFound;
+  }
+}
