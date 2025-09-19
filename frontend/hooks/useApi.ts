@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/clerk-react";
 import { useEffect, useMemo } from "react";
-// import apiClient from "../src/services/api/client";
+import { apiClient } from "../src/services/api/client";
 
 /**
  * Hook for accessing the typed API client with automatic authentication
@@ -21,7 +21,7 @@ export function useApi() {
         }
       });
     } else {
-      client.clearAuthToken();
+      client.removeAuthToken();
     }
   }, [isSignedIn, getToken, client]);
 

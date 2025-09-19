@@ -1,5 +1,5 @@
 {
-  "name": "@myco/execution-engine",
+  "name": "@myco/myco-execution-engine",
   "version": "1.0.0",
   "description": "Myco Execution Engine - Secure code execution service",
   "main": "dist/index.js",

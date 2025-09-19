@@ -1,189 +1,230 @@
 """
-Health and monitoring routes for AI engine
+Health check and readiness endpoints with comprehensive monitoring
 """
 
+import time
+import asyncio
+import logging
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
-import time
-import os
-import logging
-import asyncio
-
-from ...services.provider_selector import provider_selector
 from ...services.llm_manager import llm_manager
+from ...services.vector_store import vector_store_manager
+from ...core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("/healthz")
-async def kubernetes_health():
-    """Kubernetes health check endpoint"""
+async def health_check() -> Dict[str, Any]:
+    """
+    Kubernetes-style health check endpoint.
+    Returns 200 if service is healthy, 503 if not.
+    """
     try:
-        # Basic service checks
-        health_data = {
+        health_status = {
             "status": "healthy",
-            "service": "ai-engine",
-            "version": "1.0.0",
             "timestamp": time.time(),
+            "version": settings.VERSION if hasattr(settings, 'VERSION') else "1.0.0",
             "checks": {}
+        }
+        
+        # Basic service health
+        health_status["checks"]["service"] = {
+            "status": "healthy",
+            "message": "AI Engine service is running"
         }
         
         # Check LLM manager
         try:
-            if hasattr(llm_manager, 'health_check'):
-                health_data["checks"]["llm_manager"] = await llm_manager.health_check()
-            else:
-                health_data["checks"]["llm_manager"] = "available"
-        except Exception as e:
-            health_data["checks"]["llm_manager"] = f"error: {str(e)}"
-            health_data["status"] = "degraded"
-        
-        # Check provider selector
-        try:
-            await provider_selector._update_health_status()
-            provider_status = provider_selector.get_provider_status()
-            health_data["checks"]["providers"] = {
-                name: status.health.value 
-                for name, status in provider_status.items()
+            llm_health = await asyncio.wait_for(llm_manager.health_check(), timeout=5.0)
+            health_status["checks"]["llm_manager"] = {
+                "status": "healthy",
+                "providers": llm_health,
+                "default_provider": llm_manager.default_provider.value
             }
+        except asyncio.TimeoutError:
+            health_status["checks"]["llm_manager"] = {
+                "status": "timeout",
+                "message": "LLM health check timed out"
+            }
+            health_status["status"] = "degraded"
         except Exception as e:
-            health_data["checks"]["providers"] = f"error: {str(e)}"
-            health_data["status"] = "degraded"
-            
-        return health_data
+            health_status["checks"]["llm_manager"] = {
+                "status": "error",
+                "message": str(e)
+            }
+            health_status["status"] = "degraded"
         
+        # Check vector store manager
+        try:
+            vector_health = await asyncio.wait_for(vector_store_manager.health_check(), timeout=3.0)
+            health_status["checks"]["vector_store"] = {
+                "status": "healthy" if vector_health["initialized"] else "degraded",
+                "details": vector_health
+            }
+        except asyncio.TimeoutError:
+            health_status["checks"]["vector_store"] = {
+                "status": "timeout",
+                "message": "Vector store health check timed out"
+            }
+            health_status["status"] = "degraded"
+        except Exception as e:
+            health_status["checks"]["vector_store"] = {
+                "status": "error",
+                "message": str(e)
+            }
+        
+        # Return appropriate status code
+        if health_status["status"] == "healthy":
+            return health_status
+        else:
+            raise HTTPException(status_code=503, detail=health_status)
+            
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service unhealthy")
+        logger.error(f"Health check failed: {str(e)}", exc_info=True)
+        error_response = {
+            "status": "error",
+            "timestamp": time.time(),
+            "message": "Health check failed",
+            "error": str(e)
+        }
+        raise HTTPException(status_code=503, detail=error_response)
 
 @router.get("/ready")
-async def readiness_check():
-    """Readiness check - can the service handle requests?"""
+async def readiness_check() -> Dict[str, Any]:
+    """
+    Kubernetes-style readiness check endpoint.
+    Returns 200 if service is ready to accept traffic, 503 if not.
+    """
     try:
-        readiness_data = {
+        readiness_status = {
             "status": "ready",
             "timestamp": time.time(),
-            "providers": {},
-            "environment": {}
+            "checks": {}
         }
         
-        # Check environment configuration
-        readiness_data["environment"] = {
-            "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
-            "anthropic_configured": bool(os.getenv("ANTHROPIC_API_KEY")),
-            "google_configured": bool(os.getenv("GOOGLE_API_KEY")),
-        }
-        
-        # Test provider availability
-        try:
-            best_provider = await provider_selector.get_best_provider()
-            if not best_provider:
-                readiness_data["status"] = "degraded"
-                readiness_data["reason"] = "No available providers"
-            else:
-                readiness_data["best_provider"] = best_provider
-                
-        except Exception as e:
-            readiness_data["status"] = "degraded"
-            readiness_data["reason"] = f"Provider selection failed: {str(e)}"
-        
-        # Get detailed provider status
-        provider_status = provider_selector.get_provider_status()
-        readiness_data["providers"] = {
-            name: {
-                "health": status.health.value,
-                "response_time": status.response_time,
-                "error_rate": status.error_rate,
-                "models": status.available_models
+        # Check if LLM manager is initialized and has working providers
+        if not llm_manager.providers:
+            readiness_status["status"] = "not_ready"
+            readiness_status["checks"]["llm_providers"] = {
+                "status": "missing",
+                "message": "No LLM providers available"
             }
-            for name, status in provider_status.items()
-        }
+        else:
+            # Test at least one provider
+            working_providers = 0
+            for provider in llm_manager.providers:
+                try:
+                    await asyncio.wait_for(
+                        llm_manager.generate("test", provider=provider, max_tokens=5),
+                        timeout=10.0
+                    )
+                    working_providers += 1
+                    break  # At least one working provider is enough
+                except:
+                    continue
+            
+            if working_providers > 0:
+                readiness_status["checks"]["llm_providers"] = {
+                    "status": "ready",
+                    "working_providers": working_providers,
+                    "total_providers": len(llm_manager.providers)
+                }
+            else:
+                readiness_status["status"] = "not_ready"
+                readiness_status["checks"]["llm_providers"] = {
+                    "status": "error",
+                    "message": "No working LLM providers"
+                }
         
-        return readiness_data
+        # Check vector store readiness
+        if vector_store_manager.initialized:
+            readiness_status["checks"]["vector_store"] = {
+                "status": "ready",
+                "message": "Vector store is initialized"
+            }
+        else:
+            readiness_status["checks"]["vector_store"] = {
+                "status": "not_ready",
+                "message": "Vector store not initialized"
+            }
         
+        # Return appropriate status code
+        if readiness_status["status"] == "ready":
+            return readiness_status
+        else:
+            raise HTTPException(status_code=503, detail=readiness_status)
+            
     except Exception as e:
-        logger.error(f"Readiness check failed: {e}")
-        raise HTTPException(status_code=503, detail="Service not ready")
+        logger.error(f"Readiness check failed: {str(e)}", exc_info=True)
+        error_response = {
+            "status": "error",
+            "timestamp": time.time(),
+            "message": "Readiness check failed",
+            "error": str(e)
+        }
+        raise HTTPException(status_code=503, detail=error_response)
 
 @router.get("/metrics")
-async def metrics_endpoint():
-    """Basic metrics endpoint"""
+async def metrics() -> Dict[str, Any]:
+    """
+    Basic metrics endpoint for monitoring
+    """
     try:
         metrics_data = {
             "timestamp": time.time(),
-            "providers": {},
-            "system": {
-                "uptime": time.time(),  # Simplified uptime
-                "memory_usage": "unknown",  # Would need psutil
-                "cpu_usage": "unknown"
+            "llm_manager": {
+                "available_providers": llm_manager.get_available_providers(),
+                "default_provider": llm_manager.default_provider.value
+            },
+            "vector_store": {
+                "initialized": vector_store_manager.initialized,
+                "embedding_provider": type(vector_store_manager.embedding_provider).__name__ if vector_store_manager.embedding_provider else None,
+                "store_type": type(vector_store_manager.vector_store).__name__ if vector_store_manager.vector_store else None
             }
         }
         
-        # Provider metrics
-        provider_status = provider_selector.get_provider_status()
-        for name, status in provider_status.items():
-            metrics_data["providers"][name] = {
-                "health": status.health.value,
-                "response_time_ms": status.response_time * 1000,
-                "error_rate": status.error_rate,
-                "last_check": status.last_check,
-                "available_models_count": len(status.available_models)
-            }
-            
+        # Add provider-specific metrics
+        for provider in llm_manager.providers:
+            try:
+                models = llm_manager.get_provider_models(provider)
+                metrics_data["llm_manager"][f"{provider.value}_models"] = models
+            except:
+                pass
+        
         return metrics_data
         
     except Exception as e:
-        logger.error(f"Metrics collection failed: {e}")
-        return {"error": "Metrics unavailable", "timestamp": time.time()}
+        logger.error(f"Metrics collection failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Metrics collection failed: {str(e)}")
 
 @router.get("/status")
-async def detailed_status():
-    """Detailed status information for debugging"""
+async def service_status() -> Dict[str, Any]:
+    """
+    Comprehensive service status endpoint
+    """
     try:
-        status_data = {
-            "timestamp": time.time(),
-            "service": "ai-engine",
-            "version": "1.0.0",
-            "environment": {
-                "python_version": f"{os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
-                "environment_variables": {
-                    "OPENAI_API_KEY": "configured" if os.getenv("OPENAI_API_KEY") else "missing",
-                    "ANTHROPIC_API_KEY": "configured" if os.getenv("ANTHROPIC_API_KEY") else "missing",
-                    "GOOGLE_API_KEY": "configured" if os.getenv("GOOGLE_API_KEY") else "missing",
-                    "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO"),
-                    "AI_PROVIDER": os.getenv("AI_PROVIDER", "auto")
-                }
-            },
-            "providers": {},
-            "capabilities": [
-                "text generation",
-                "chat completion", 
-                "code generation",
-                "provider selection",
-                "health monitoring"
-            ]
-        }
+        # Get health and readiness
+        health = await health_check()
+        readiness = await readiness_check()
+        metrics = await metrics()
         
-        # Detailed provider information
-        await provider_selector._update_health_status()
-        provider_status = provider_selector.get_provider_status()
-        
-        for name, status in provider_status.items():
-            status_data["providers"][name] = {
-                "health": status.health.value,
-                "response_time": status.response_time,
-                "error_rate": status.error_rate,
-                "last_check": status.last_check,
-                "available_models": status.available_models,
-                "api_key_configured": provider_selector._has_api_key(name)
-            }
-            
-        return status_data
-        
-    except Exception as e:
-        logger.error(f"Status collection failed: {e}")
         return {
-            "error": "Status collection failed",
-            "detail": str(e),
-            "timestamp": time.time()
+            "service": "AI Engine",
+            "timestamp": time.time(),
+            "health": health,
+            "readiness": readiness,
+            "metrics": metrics
         }
+        
+    except HTTPException as e:
+        # Return partial status even if some checks fail
+        return {
+            "service": "AI Engine",
+            "timestamp": time.time(),
+            "status": "partial",
+            "error": e.detail
+        }
+    except Exception as e:
+        logger.error(f"Status check failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")

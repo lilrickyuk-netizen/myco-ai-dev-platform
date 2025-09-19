@@ -48,7 +48,8 @@ class EmbeddingProvider:
     """Base class for embedding providers"""
     
     async def get_embedding(self, text: str) -> List[float]:
-        raise NotImplementedError
+        """Get embedding for a single text - must be implemented by subclasses"""
+        raise RuntimeError("EmbeddingProvider.get_embedding must be implemented by subclass")
     
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Get embeddings for multiple texts"""

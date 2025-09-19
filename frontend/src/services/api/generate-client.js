@@ -1,206 +1,204 @@
 #!/usr/bin/env node
 
 /**
- * Generate typed API client from OpenAPI specification
+ * OpenAPI TypeScript Client Generator
+ * Generates a typed client from the backend OpenAPI specification
  */
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const yaml = require('js-yaml');
 
-const OPENAPI_SPEC_PATH = path.join(__dirname, '../../../../backend/openapi.yaml');
-const OUTPUT_DIR = path.join(__dirname);
-const CLIENT_OUTPUT = path.join(OUTPUT_DIR, 'client.ts');
-const TYPES_OUTPUT = path.join(OUTPUT_DIR, 'types.ts');
+const OPENAPI_SPEC_PATH = '../../../../backend/openapi.yaml';
+const OUTPUT_FILE = './client.ts';
 
-async function generateClient() {
-  console.log('🔧 Generating typed API client from OpenAPI spec...');
+function pascalCase(str) {
+  return str.replace(/(^\w|[A-Z]|\b\w)/g, (word, index) => {
+    return index === 0 ? word.toLowerCase() : word.toUpperCase();
+  }).replace(/\s+/g, '');
+}
+
+function camelCase(str) {
+  return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+}
+
+function generateTypeFromSchema(schema, refs = new Set()) {
+  if (!schema) return 'any';
   
-  try {
-    // Check if OpenAPI spec exists
-    if (!fs.existsSync(OPENAPI_SPEC_PATH)) {
-      throw new Error(`OpenAPI spec not found at: ${OPENAPI_SPEC_PATH}`);
+  if (schema.$ref) {
+    const typeName = schema.$ref.split('/').pop();
+    refs.add(typeName);
+    return typeName;
+  }
+  
+  if (schema.type === 'string') {
+    if (schema.enum) {
+      return schema.enum.map(v => `'${v}'`).join(' | ');
     }
-
-    // Ensure output directory exists
-    if (!fs.existsSync(OUTPUT_DIR)) {
-      fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+    return schema.nullable ? 'string | null' : 'string';
+  }
+  
+  if (schema.type === 'number' || schema.type === 'integer') {
+    return schema.nullable ? 'number | null' : 'number';
+  }
+  
+  if (schema.type === 'boolean') {
+    return schema.nullable ? 'boolean | null' : 'boolean';
+  }
+  
+  if (schema.type === 'array') {
+    const itemType = generateTypeFromSchema(schema.items, refs);
+    return `Array<${itemType}>`;
+  }
+  
+  if (schema.type === 'object') {
+    if (schema.properties) {
+      const props = Object.entries(schema.properties).map(([key, prop]) => {
+        const optional = !schema.required?.includes(key) ? '?' : '';
+        const type = generateTypeFromSchema(prop, refs);
+        return `  ${key}${optional}: ${type};`;
+      }).join('\n');
+      return `{\n${props}\n}`;
     }
+    return 'Record<string, any>';
+  }
+  
+  return 'any';
+}
 
-    console.log('📋 Generating TypeScript types...');
-    
-    // Generate TypeScript types using openapi-typescript
-    try {
-      execSync(`npx openapi-typescript "${OPENAPI_SPEC_PATH}" --output "${TYPES_OUTPUT}"`, {
-        stdio: 'inherit'
-      });
-      console.log('✅ Types generated successfully');
-    } catch (error) {
-      console.error('❌ Failed to generate types:', error.message);
-      throw error;
-    }
-
-    console.log('🔨 Generating API client...');
-    
-    // Generate the client implementation
-    const clientCode = generateClientImplementation();
-    fs.writeFileSync(CLIENT_OUTPUT, clientCode);
-    
-    console.log('✅ API client generated successfully');
-    console.log(`📄 Types: ${TYPES_OUTPUT}`);
-    console.log(`🎯 Client: ${CLIENT_OUTPUT}`);
-    
-  } catch (error) {
-    console.error('❌ Client generation failed:', error.message);
-    process.exit(1);
+function generateInterface(name, schema, refs) {
+  const type = generateTypeFromSchema(schema, refs);
+  
+  if (type.startsWith('{')) {
+    return `export interface ${name} ${type}`;
+  } else {
+    return `export type ${name} = ${type};`;
   }
 }
 
-function generateClientImplementation() {
-  return `/**
- * Auto-generated API client for MYCO AI Dev Platform
+function getPathParams(path) {
+  const matches = path.match(/\{([^}]+)\}/g);
+  return matches ? matches.map(m => m.slice(1, -1)) : [];
+}
+
+function generateMethodName(method, path) {
+  const pathParts = path.split('/').filter(p => p && !p.startsWith('{'));
+  const methodMap = {
+    'get': pathParts.length > 1 ? `get${pascalCase(pathParts.join(' '))}` : 'get',
+    'post': pathParts.length > 1 ? `create${pascalCase(pathParts.join(' '))}` : 'create',
+    'put': pathParts.length > 1 ? `update${pascalCase(pathParts.join(' '))}` : 'update',
+    'delete': pathParts.length > 1 ? `delete${pascalCase(pathParts.join(' '))}` : 'delete'
+  };
+  
+  return methodMap[method] || camelCase(`${method}-${pathParts.join('-')}`);
+}
+
+function generateClient() {
+  console.log('Generating TypeScript client from OpenAPI spec...');
+  
+  // Read OpenAPI spec
+  const specPath = path.resolve(__dirname, OPENAPI_SPEC_PATH);
+  if (!fs.existsSync(specPath)) {
+    throw new Error(`OpenAPI spec not found at ${specPath}`);
+  }
+  
+  const spec = yaml.load(fs.readFileSync(specPath, 'utf8'));
+  
+  const client = [];
+  const refs = new Set();
+  
+  // Generate header
+  client.push(`/**
+ * Generated TypeScript Client
  * 
- * This file is generated automatically from the OpenAPI specification.
+ * This file is auto-generated from the OpenAPI specification.
  * Do not edit this file directly.
  */
 
-import { z } from 'zod';
-import type { paths, components } from './types';
-
-// Base configuration
-const API_BASE_URL = process.env.REACT_APP_API_URL || '';
-const DEFAULT_TIMEOUT = 30000;
-
-// Type definitions from OpenAPI spec
-export type ApiPaths = paths;
-export type ApiComponents = components;
-
-// Request/Response types
-type ApiResponse<T> = {
+// Base types
+export interface ApiResponse<T = any> {
   data: T;
   status: number;
+  statusText: string;
   headers: Record<string, string>;
-};
+}
 
-type ApiError = {
+export interface ApiError {
   code: string;
   message: string;
   details?: any;
   status: number;
-};
-
-// HTTP methods
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-
-// Request options
-interface RequestOptions {
-  timeout?: number;
-  signal?: AbortSignal;
-  headers?: Record<string, string>;
 }
 
-// Zod schemas for runtime validation
-const ErrorResponseSchema = z.object({
-  code: z.string(),
-  message: z.string(),
-  details: z.any().optional(),
-});
+export class ApiClientError extends Error {
+  constructor(
+    public error: ApiError,
+    public response?: Response
+  ) {
+    super(error.message);
+    this.name = 'ApiClientError';
+  }
+}
 
-const UserInfoSchema = z.object({
-  id: z.string(),
-  email: z.string().email().nullable(),
-  imageUrl: z.string().url(),
-  firstName: z.string().nullable(),
-  lastName: z.string().nullable(),
-});
+// Configuration
+export interface ApiClientConfig {
+  baseUrl?: string;
+  headers?: Record<string, string>;
+  timeout?: number;
+}
+`);
 
-const ProjectSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
-  template: z.string().nullable(),
-  templateType: z.string(),
-  templateName: z.string(),
-  status: z.enum(['active', 'archived', 'deleted']),
-  visibility: z.enum(['private', 'public']),
-  repositoryUrl: z.string().url().nullable(),
-  deployUrl: z.string().url().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  isOwner: z.boolean(),
-});
+  // Generate interfaces from components
+  if (spec.components?.schemas) {
+    client.push('\n// Schema Types');
+    for (const [name, schema] of Object.entries(spec.components.schemas)) {
+      client.push(generateInterface(name, schema, refs));
+      client.push('');
+    }
+  }
 
-const FileNodeSchema: z.ZodType<any> = z.lazy(() => z.object({
-  id: z.string(),
-  name: z.string(),
-  path: z.string(),
-  type: z.enum(['file', 'directory']),
-  content: z.string().nullable(),
-  children: z.array(FileNodeSchema).nullable(),
-  size: z.number().min(0),
-  lastModified: z.string(),
-  isReadonly: z.boolean().optional(),
-}));
-
-const GenerateResponseSchema = z.object({
-  content: z.string(),
-  usage: z.object({
-    promptTokens: z.number(),
-    completionTokens: z.number(),
-    totalTokens: z.number(),
-  }).optional(),
-});
-
-const ChatMessageSchema = z.object({
-  id: z.string(),
-  role: z.enum(['user', 'assistant', 'system']),
-  content: z.string(),
-  timestamp: z.string(),
-});
-
-class ApiClient {
+  // Generate client class
+  client.push(`
+export class ApiClient {
   private baseUrl: string;
-  private defaultHeaders: Record<string, string>;
+  private headers: Record<string, string>;
+  private timeout: number;
 
-  constructor(baseUrl: string = API_BASE_URL) {
-    this.baseUrl = baseUrl.replace(/\\/$/, '');
-    this.defaultHeaders = {
+  constructor(config: ApiClientConfig = {}) {
+    this.baseUrl = config.baseUrl || '';
+    this.headers = {
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
+      ...config.headers
     };
+    this.timeout = config.timeout || 30000;
   }
 
   setAuthToken(token: string) {
-    this.defaultHeaders['Authorization'] = \`Bearer \${token}\`;
+    this.headers['Authorization'] = \`Bearer \${token}\`;
   }
 
-  clearAuthToken() {
-    delete this.defaultHeaders['Authorization'];
+  removeAuthToken() {
+    delete this.headers['Authorization'];
   }
 
   private async request<T>(
-    method: HttpMethod,
-    endpoint: string,
-    data?: any,
-    options: RequestOptions = {}
+    method: string,
+    path: string,
+    body?: any,
+    options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
-    const url = \`\${this.baseUrl}\${endpoint}\`;
-    const controller = new AbortController();
-    const signal = options.signal || controller.signal;
+    const url = \`\${this.baseUrl}\${path}\`;
     
-    // Set timeout
-    const timeout = options.timeout || DEFAULT_TIMEOUT;
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
       const response = await fetch(url, {
         method,
-        headers: {
-          ...this.defaultHeaders,
-          ...options.headers,
-        },
-        body: data ? JSON.stringify(data) : undefined,
-        signal,
+        headers: { ...this.headers, ...options.headers },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+        ...options
       });
 
       clearTimeout(timeoutId);
@@ -211,217 +209,140 @@ class ApiClient {
       });
 
       if (!response.ok) {
-        let errorData;
+        let errorData: ApiError;
         try {
           errorData = await response.json();
-          ErrorResponseSchema.parse(errorData);
         } catch {
           errorData = {
             code: 'unknown_error',
-            message: response.statusText || 'Unknown error occurred',
+            message: response.statusText || 'Unknown error',
+            status: response.status
           };
         }
-
-        throw new ApiError({
-          ...errorData,
-          status: response.status,
-        });
+        throw new ApiClientError(errorData, response);
       }
 
-      let responseData;
-      try {
-        responseData = await response.json();
-      } catch {
-        responseData = null;
-      }
+      const data = response.headers.get('content-type')?.includes('application/json')
+        ? await response.json()
+        : await response.text();
 
       return {
-        data: responseData,
+        data,
         status: response.status,
-        headers: responseHeaders,
+        statusText: response.statusText,
+        headers: responseHeaders
       };
     } catch (error) {
       clearTimeout(timeoutId);
-      if (error instanceof ApiError) {
+      
+      if (error instanceof ApiClientError) {
         throw error;
       }
       
       if (error.name === 'AbortError') {
-        throw new ApiError({
+        throw new ApiClientError({
           code: 'timeout',
           message: 'Request timeout',
-          status: 408,
+          status: 408
         });
       }
-
-      throw new ApiError({
+      
+      throw new ApiClientError({
         code: 'network_error',
-        message: error.message || 'Network error occurred',
-        status: 0,
+        message: error.message || 'Network error',
+        status: 0
       });
     }
   }
+`);
 
-  // Health endpoints
-  async getHealth(): Promise<ApiResponse<components['schemas']['GlobalHealthResponse']>> {
-    return this.request('GET', '/health');
+  // Generate methods for each endpoint
+  if (spec.paths) {
+    for (const [path, pathItem] of Object.entries(spec.paths)) {
+      for (const [method, operation] of Object.entries(pathItem)) {
+        if (!['get', 'post', 'put', 'delete', 'patch'].includes(method)) continue;
+
+        const methodName = generateMethodName(method, path);
+        const pathParams = getPathParams(path);
+        const hasRequestBody = operation.requestBody;
+        const responseSchema = operation.responses?.['200']?.content?.['application/json']?.schema;
+        
+        // Generate method signature
+        const params = [];
+        
+        // Path parameters
+        if (pathParams.length > 0) {
+          params.push(`params: { ${pathParams.map(p => `${p}: string`).join('; ')} }`);
+        }
+        
+        // Request body
+        if (hasRequestBody) {
+          const bodySchema = hasRequestBody.content?.['application/json']?.schema;
+          if (bodySchema) {
+            const bodyType = generateTypeFromSchema(bodySchema, refs);
+            params.push(`body: ${bodyType}`);
+          } else {
+            params.push('body: any');
+          }
+        }
+        
+        // Options
+        params.push('options: RequestInit = {}');
+        
+        // Return type
+        let returnType = 'any';
+        if (responseSchema) {
+          returnType = generateTypeFromSchema(responseSchema, refs);
+        }
+        
+        // Build URL with path parameters
+        let urlBuilder = `'${path}'`;
+        for (const param of pathParams) {
+          urlBuilder = urlBuilder.replace(`{${param}}`, `\${params.${param}}`);
+        }
+        
+        client.push(`
+  async ${methodName}(${params.join(', ')}): Promise<ApiResponse<${returnType}>> {
+    return this.request<${returnType}>(
+      '${method.toUpperCase()}',
+      ${urlBuilder},
+      ${hasRequestBody ? 'body' : 'undefined'},
+      options
+    );
+  }`);
+      }
+    }
   }
 
-  async getReadiness(): Promise<ApiResponse<components['schemas']['ReadinessResponse']>> {
-    return this.request('GET', '/ready');
-  }
-
-  // Authentication endpoints
-  async getCurrentUser(): Promise<ApiResponse<components['schemas']['UserInfo']>> {
-    const response = await this.request('GET', '/user/me');
-    UserInfoSchema.parse(response.data);
-    return response;
-  }
-
-  // Project endpoints
-  async getProjects(): Promise<ApiResponse<{ projects: components['schemas']['Project'][] }>> {
-    const response = await this.request('GET', '/projects');
-    z.object({ projects: z.array(ProjectSchema) }).parse(response.data);
-    return response;
-  }
-
-  async createProject(
-    data: components['schemas']['CreateProjectRequest']
-  ): Promise<ApiResponse<components['schemas']['Project']>> {
-    const response = await this.request('POST', '/projects', data);
-    ProjectSchema.parse(response.data);
-    return response;
-  }
-
-  async getProject(id: string): Promise<ApiResponse<components['schemas']['Project']>> {
-    const response = await this.request('GET', \`/projects/\${id}\`);
-    ProjectSchema.parse(response.data);
-    return response;
-  }
-
-  async updateProject(
-    id: string,
-    data: components['schemas']['UpdateProjectRequest']
-  ): Promise<ApiResponse<components['schemas']['Project']>> {
-    const response = await this.request('PUT', \`/projects/\${id}\`, data);
-    ProjectSchema.parse(response.data);
-    return response;
-  }
-
-  async deleteProject(id: string): Promise<ApiResponse<{ success: boolean }>> {
-    return this.request('DELETE', \`/projects/\${id}\`);
-  }
-
-  // File system endpoints
-  async getProjectFiles(projectId: string): Promise<ApiResponse<components['schemas']['FileListResponse']>> {
-    const response = await this.request('GET', \`/filesystem/\${projectId}\`);
-    z.object({ files: z.array(FileNodeSchema) }).parse(response.data);
-    return response;
-  }
-
-  async getFile(id: string): Promise<ApiResponse<components['schemas']['FileNode']>> {
-    const response = await this.request('GET', \`/filesystem/file/\${id}\`);
-    FileNodeSchema.parse(response.data);
-    return response;
-  }
-
-  async createFile(
-    data: components['schemas']['CreateFileRequest']
-  ): Promise<ApiResponse<components['schemas']['FileNode']>> {
-    const response = await this.request('POST', '/filesystem/file', data);
-    FileNodeSchema.parse(response.data);
-    return response;
-  }
-
-  async updateFile(
-    id: string,
-    data: components['schemas']['UpdateFileRequest']
-  ): Promise<ApiResponse<components['schemas']['FileNode']>> {
-    const response = await this.request('PUT', \`/filesystem/file/\${id}\`, data);
-    FileNodeSchema.parse(response.data);
-    return response;
-  }
-
-  async deleteFile(id: string): Promise<ApiResponse<{ success: boolean }>> {
-    return this.request('DELETE', \`/filesystem/file/\${id}\`);
-  }
-
-  // AI endpoints
-  async generateText(
-    data: components['schemas']['GenerateRequest']
-  ): Promise<ApiResponse<components['schemas']['GenerateResponse']>> {
-    const response = await this.request('POST', '/ai/generate', data);
-    GenerateResponseSchema.parse(response.data);
-    return response;
-  }
-
-  async chat(
-    data: components['schemas']['ChatRequest']
-  ): Promise<ApiResponse<components['schemas']['ChatResponse']>> {
-    const response = await this.request('POST', '/ai/chat', data);
-    z.object({
-      message: ChatMessageSchema,
-      sessionId: z.string(),
-    }).parse(response.data);
-    return response;
-  }
+  client.push(`
 }
 
-// Custom error class
-class ApiError extends Error {
-  code: string;
-  status: number;
-  details?: any;
+// Default instance
+export const apiClient = new ApiClient({
+  baseUrl: process.env.NODE_ENV === 'production' 
+    ? 'https://myco-ai-dev-platform-d32ldfc82vjkjrpel8hg.lp.dev' 
+    : 'http://localhost:4000'
+});
 
-  constructor({ code, message, status, details }: {
-    code: string;
-    message: string;
-    status: number;
-    details?: any;
-  }) {
-    super(message);
-    this.name = 'ApiError';
-    this.code = code;
-    this.status = status;
-    this.details = details;
-  }
+export default apiClient;
+`);
 
-  isValidationError(): boolean {
-    return this.status === 422 || this.code === 'invalid_argument';
-  }
-
-  isAuthError(): boolean {
-    return this.status === 401 || this.code === 'unauthenticated';
-  }
-
-  isForbiddenError(): boolean {
-    return this.status === 403 || this.code === 'permission_denied';
-  }
-
-  isNotFoundError(): boolean {
-    return this.status === 404 || this.code === 'not_found';
-  }
-
-  isRateLimitError(): boolean {
-    return this.status === 429 || this.code === 'resource_exhausted';
-  }
-
-  isServerError(): boolean {
-    return this.status >= 500;
-  }
-}
-
-// Create and export default client instance
-const apiClient = new ApiClient();
-
-export { ApiClient, ApiError, apiClient as default };
-export type { ApiResponse, RequestOptions };
-`;
+  // Write the generated client
+  const outputPath = path.resolve(__dirname, OUTPUT_FILE);
+  fs.writeFileSync(outputPath, client.join('\n'));
+  
+  console.log(`✅ Generated TypeScript client at ${outputPath}`);
+  console.log(`📊 Generated ${refs.size} type definitions`);
 }
 
 // Run if called directly
 if (require.main === module) {
-  generateClient();
+  try {
+    generateClient();
+  } catch (error) {
+    console.error('❌ Failed to generate client:', error.message);
+    process.exit(1);
+  }
 }
 
 module.exports = { generateClient };

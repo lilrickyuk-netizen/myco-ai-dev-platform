@@ -97,16 +97,22 @@ app.add_middleware(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Include health check routes
+# Include API routes
 try:
     from .api.routes.health import router as health_router
+    from .api.routes.generation import router as generation_router
     app.include_router(health_router, tags=["health"])
+    app.include_router(generation_router, prefix="/api/v1", tags=["generation"])
+    logger.info("Loaded hardened API routes")
 except ImportError:
     try:
         from api.routes.health import router as health_router
+        from api.routes.generation import router as generation_router
         app.include_router(health_router, tags=["health"])
+        app.include_router(generation_router, prefix="/api/v1", tags=["generation"])
+        logger.info("Loaded hardened API routes")
     except ImportError:
-        logger.warning("Health routes not available - using built-in endpoints")
+        logger.warning("API routes not available - using built-in endpoints")
 
 # Add request ID middleware for tracking
 @app.middleware("http")
