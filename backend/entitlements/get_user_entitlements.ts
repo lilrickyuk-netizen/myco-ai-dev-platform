@@ -49,7 +49,7 @@ export const getUserEntitlements = api<void, UserEntitlements>(
       return {
         userId: auth.userID,
         plan: userPlan,
-        features: planFeatures as string[]
+        features: [...planFeatures]
       };
 
     } catch (error) {

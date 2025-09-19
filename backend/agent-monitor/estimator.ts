@@ -1,7 +1,5 @@
-import { SQLDatabase } from "encore.dev/storage/sqldb";
+import db from "../db";
 import { AgentStatus, WorkflowPhase } from "./types";
-
-const db = new SQLDatabase("agent_monitor", { migrations: "./db/migrations" });
 
 interface EstimationData {
   agentType: string;
@@ -68,7 +66,7 @@ export class CompletionTimeEstimator {
 
   static async estimateWorkflowCompletion(workflowId: string): Promise<Date | null> {
     try {
-      const workflow = await db.query`
+      const workflow = await db.queryAll`
         SELECT w.*, 
                COUNT(a.id) as total_agents,
                COUNT(CASE WHEN a.status = 'completed' THEN 1 END) as completed_agents,
@@ -84,7 +82,7 @@ export class CompletionTimeEstimator {
       const workflowData = workflow[0];
       
       // Get all agents with their estimated completion times
-      const agents = await db.query`
+      const agents = await db.queryAll`
         SELECT id, type, status, progress, estimated_completion_time
         FROM agents
         WHERE workflow_id = ${workflowId}
@@ -141,7 +139,7 @@ export class CompletionTimeEstimator {
     }
 
     try {
-      const result = await db.query`
+      const result = await db.queryAll`
         SELECT 
           type,
           AVG(EXTRACT(EPOCH FROM (completed_at - started_at))) as avg_duration,
@@ -182,7 +180,7 @@ export class CompletionTimeEstimator {
     limit: number = 10
   ): Promise<ProgressPoint[]> {
     try {
-      const result = await db.query`
+      const result = await db.queryAll`
         SELECT progress, created_at as timestamp
         FROM agent_progress_updates
         WHERE agent_id = ${agentId}
@@ -227,7 +225,7 @@ export class CompletionTimeEstimator {
   static async updateEstimations(workflowId: string): Promise<void> {
     try {
       // Update all agent estimations
-      const agents = await db.query`
+      const agents = await db.queryAll`
         SELECT id, type, progress, status
         FROM agents
         WHERE workflow_id = ${workflowId}

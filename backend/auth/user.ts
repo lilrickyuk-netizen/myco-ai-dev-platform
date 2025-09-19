@@ -9,6 +9,25 @@ export interface UserInfo {
   lastName: string | null;
 }
 
+// Legacy types for backwards compatibility with tests
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface UpdateProfileRequest {
+  firstName?: string;
+  lastName?: string;
+  imageUrl?: string;
+}
+
 // Gets the current user's information.
 export const getUserInfo = api<void, UserInfo>(
   { auth: true, expose: true, method: "GET", path: "/user/me" },

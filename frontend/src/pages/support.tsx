@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import config from "../config";
+import config from "../../config";
 
 export default function Support() {
   return (

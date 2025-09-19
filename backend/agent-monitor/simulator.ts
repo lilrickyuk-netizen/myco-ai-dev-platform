@@ -1,10 +1,8 @@
 import { api } from "encore.dev/api";
-import { SQLDatabase } from "encore.dev/storage/sqldb";
+import db from "../db";
 import { broadcastProgressUpdate } from "./monitor";
 import { CompletionTimeEstimator } from "./estimator";
 import { AgentProgressUpdate } from "./types";
-
-const db = new SQLDatabase("agent_monitor", { migrations: "./db/migrations" });
 
 interface SimulationRequest {
   projectId: string;
@@ -23,7 +21,7 @@ export const startSimulation = api<SimulationRequest, SimulationResponse>(
     const speed = req.speed || 1;
     
     // Create a sample workflow
-    const workflow = await db.query`
+    const workflow = await db.queryAll`
       INSERT INTO workflows (project_id, current_phase, status)
       VALUES (${req.projectId}, 'Planning', 'running')
       RETURNING id
@@ -40,7 +38,7 @@ export const startSimulation = api<SimulationRequest, SimulationResponse>(
 
     const phaseIds = new Map<string, string>();
     for (const phase of phases) {
-      const result = await db.query`
+      const result = await db.queryAll`
         INSERT INTO workflow_phases (
           workflow_id, name, description, estimated_duration, phase_order
         )
@@ -74,7 +72,7 @@ export const startSimulation = api<SimulationRequest, SimulationResponse>(
     // Create agents
     for (const config of agentConfigs) {
       const phaseId = phaseIds.get(config.phase);
-      const result = await db.query`
+      const result = await db.queryAll`
         INSERT INTO agents (workflow_id, phase_id, name, type)
         VALUES (${workflowId}, ${phaseId}, ${config.name}, ${config.type})
         RETURNING id
@@ -88,7 +86,7 @@ export const startSimulation = api<SimulationRequest, SimulationResponse>(
       for (const depName of config.dependencies) {
         const depAgentId = agentIds.get(depName);
         if (depAgentId) {
-          await db.query`
+          await db.exec`
             INSERT INTO agent_dependencies (agent_id, depends_on_agent_id)
             VALUES (${agentId}, ${depAgentId})
           `;
@@ -161,6 +159,9 @@ async function simulateAgentProgress(
       agentConfig.type,
       actualProgress
     );
+    
+    // Ensure estimatedCompletion is a Date or null for the update
+    const estimationTime: Date | undefined = estimatedCompletion || undefined;
 
     // Create progress update
     const update: AgentProgressUpdate = {
@@ -169,7 +170,7 @@ async function simulateAgentProgress(
       progress: Math.round(actualProgress),
       status: actualProgress >= 100 ? 'completed' : 'running',
       message: generateProgressMessage(agentConfig.name, actualProgress),
-      estimatedCompletionTime: estimatedCompletion,
+      estimatedCompletionTime: estimationTime,
       outputs: generateOutputs(agentConfig.type, actualProgress)
     };
 

@@ -22,3 +22,20 @@ export interface GenerateResponse {
     totalTokens: number;
   };
 }
+
+// Legacy types for backwards compatibility with tests
+export interface GenerateCodeRequest extends GenerateRequest {}
+
+export interface ChatRequest {
+  sessionId?: string;
+  messages: ChatMessage[];
+  projectId?: string;
+}
+
+export interface ChatResponse {
+  message: ChatMessage;
+  sessionId: string;
+  response?: string;
+  suggestions?: string[];
+  contextUsed?: boolean;
+}

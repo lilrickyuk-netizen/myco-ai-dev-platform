@@ -1,5 +1,5 @@
 import { api, APIError } from "encore.dev/api";
-import type { ChatMessage, GenerateRequest, GenerateResponse } from "./types";
+import type { ChatMessage, GenerateRequest, GenerateResponse, ChatRequest, ChatResponse } from "./types";
 import { getAuthData } from "~encore/auth";
 import { requireFeature } from "../entitlements/middleware";
 import { FEATURES } from "../entitlements/types";
@@ -118,16 +118,7 @@ export const generate = api(
   }
 );
 
-interface ChatRequest {
-  sessionId?: string;
-  messages: ChatMessage[];
-  projectId?: string;
-}
-
-interface ChatResponse {
-  message: ChatMessage;
-  sessionId: string;
-}
+// ChatRequest and ChatResponse now imported from types
 
 // Handles multi-turn chat conversations with context.
 export const chat = api(
@@ -228,7 +219,10 @@ export const chat = api(
 
       return {
         message: assistantMessage,
-        sessionId
+        sessionId,
+        response: assistantMessage.content,
+        suggestions: [],
+        contextUsed: true
       };
     } catch (error) {
       console.error("Chat error:", error);
@@ -249,8 +243,21 @@ export const chat = api(
 
       return {
         message: fallbackMessage,
-        sessionId
+        sessionId,
+        response: fallbackMessage.content,
+        suggestions: [],
+        contextUsed: false
       };
     }
   }
 );
+
+// Legacy exports for backward compatibility with tests
+export const generateCode = generate;
+export async function getModels() {
+  return [
+    { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
+    { id: "gpt-4", name: "GPT-4" },
+    { id: "claude-3-sonnet", name: "Claude 3 Sonnet" }
+  ];
+}

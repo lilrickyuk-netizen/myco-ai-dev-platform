@@ -1,8 +1,6 @@
 import { api } from "encore.dev/api";
-import { SQLDatabase } from "encore.dev/storage/sqldb";
+import db from "../db";
 import { WorkflowStatus, AgentStatus, WorkflowPhase, AgentDependencyGraph } from "./types";
-
-const db = new SQLDatabase("agent_monitor", { migrations: "./db/migrations" });
 
 interface CreateWorkflowRequest {
   projectId: string;
@@ -26,9 +24,10 @@ interface CreateWorkflowResponse {
 export const createWorkflow = api<CreateWorkflowRequest, CreateWorkflowResponse>(
   { expose: true, method: "POST", path: "/agent-monitor/workflows", auth: true },
   async (req): Promise<CreateWorkflowResponse> => {
-    return await db.tx(async (tx) => {
+    const transaction = await db.begin();
+    try {
       // Create workflow
-      const workflow = await tx.query`
+      const workflow = await transaction.queryAll`
         INSERT INTO workflows (project_id, current_phase)
         VALUES (${req.projectId}, ${req.phases[0]?.name || 'Planning'})
         RETURNING id
@@ -39,7 +38,7 @@ export const createWorkflow = api<CreateWorkflowRequest, CreateWorkflowResponse>
       const phaseMap = new Map<string, string>();
       for (let i = 0; i < req.phases.length; i++) {
         const phase = req.phases[i];
-        const phaseResult = await tx.query`
+        const phaseResult = await transaction.queryAll`
           INSERT INTO workflow_phases (
             workflow_id, name, description, estimated_duration, phase_order
           )
@@ -55,7 +54,7 @@ export const createWorkflow = api<CreateWorkflowRequest, CreateWorkflowResponse>
         const phaseId = phaseMap.get(phase.name);
         
         for (const agent of phase.agents) {
-          const agentResult = await tx.query`
+          const agentResult = await transaction.queryAll`
             INSERT INTO agents (workflow_id, phase_id, name, type)
             VALUES (${workflowId}, ${phaseId}, ${agent.name}, ${agent.type})
             RETURNING id
@@ -72,7 +71,7 @@ export const createWorkflow = api<CreateWorkflowRequest, CreateWorkflowResponse>
             for (const depName of agent.dependencies) {
               const depAgentId = agentMap.get(depName);
               if (depAgentId) {
-                await tx.query`
+                await transaction.exec`
                   INSERT INTO agent_dependencies (agent_id, depends_on_agent_id)
                   VALUES (${agentId}, ${depAgentId})
                 `;
@@ -82,8 +81,12 @@ export const createWorkflow = api<CreateWorkflowRequest, CreateWorkflowResponse>
         }
       }
 
+      await transaction.commit();
       return { workflowId };
-    });
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
   }
 );
 

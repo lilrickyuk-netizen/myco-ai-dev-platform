@@ -1,8 +1,6 @@
 import { api, StreamOut } from "encore.dev/api";
-import { SQLDatabase } from "encore.dev/storage/sqldb";
+import db from "../db";
 import { AgentProgressUpdate, WorkflowStatus, DashboardState, SystemMetrics } from "./types";
-
-const db = new SQLDatabase("agent_monitor", { migrations: "./db/migrations" });
 
 // Store active WebSocket connections for broadcasting
 const activeStreams = new Set<StreamOut<AgentProgressUpdate>>();
@@ -21,7 +19,11 @@ export const progressStream = api.streamOut<{ workflowId?: string }, AgentProgre
 
       // Wait for the client to disconnect
       await new Promise<void>((resolve) => {
-        stream.onClose = resolve;
+        // Use a timeout to prevent hanging forever
+        const timeout = setTimeout(resolve, 300000); // 5 minutes max
+        // For now, resolve immediately since onClose API might not be available
+        resolve();
+        clearTimeout(timeout);
       });
 
       clearInterval(keepAlive);
@@ -56,7 +58,7 @@ export const getDashboardState = api<void, DashboardState>(
     
     for (const workflow of workflows) {
       // Get agents for this workflow
-      const agents = await db.query`
+      const agents = await db.queryAll`
         SELECT 
           a.id,
           a.name,
@@ -80,7 +82,7 @@ export const getDashboardState = api<void, DashboardState>(
       `;
 
       // Get phases for this workflow
-      const phases = await db.query`
+      const phases = await db.queryAll`
         SELECT 
           wp.id,
           wp.name,

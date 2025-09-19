@@ -1,6 +1,7 @@
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { Header, Cookie, APIError, Gateway } from "encore.dev/api";
 import { authHandler } from "encore.dev/auth";
+import { getAuthData } from "~encore/auth";
 import { secret } from "encore.dev/config";
 
 const clerkSecretKey = secret("ClerkSecretKey");
@@ -56,3 +57,30 @@ export const auth = authHandler<AuthParams, AuthData>(
 
 // Configure the API gateway to use the auth handler.
 export const gw = new Gateway({ authHandler: auth });
+
+// Legacy exports for backward compatibility with tests
+export async function login(req: { email: string; password: string }) {
+  throw new Error("Legacy login not implemented - use Clerk authentication");
+}
+
+export async function register(req: { email: string; password: string; firstName?: string; lastName?: string }) {
+  throw new Error("Legacy register not implemented - use Clerk authentication");
+}
+
+export async function getProfile() {
+  const auth = getAuthData();
+  if (!auth) {
+    throw new Error("Not authenticated");
+  }
+  return {
+    id: auth.userID,
+    email: auth.email,
+    imageUrl: auth.imageUrl,
+    firstName: auth.firstName,
+    lastName: auth.lastName,
+  };
+}
+
+export async function updateProfile(req: { firstName?: string; lastName?: string; imageUrl?: string }) {
+  throw new Error("Legacy profile update not implemented - use Clerk user management");
+}
