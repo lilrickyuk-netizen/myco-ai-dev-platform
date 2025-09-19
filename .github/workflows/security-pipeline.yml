@@ -1,0 +1,229 @@
+name: Security Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * 1' # Weekly on Monday at 2 AM
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: TruffleHog OSS
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        component: [backend, frontend, ai-engine]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js (for Node.js components)
+      if: matrix.component != 'ai-engine'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Setup Python (for AI Engine)
+      if: matrix.component == 'ai-engine'
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Run Snyk vulnerability scan
+      uses: snyk/actions/node@master
+      if: matrix.component != 'ai-engine'
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high --file=${{ matrix.component }}/package.json
+    
+    - name: Run Snyk Python scan
+      uses: snyk/actions/python@master
+      if: matrix.component == 'ai-engine'
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high --file=ai-engine/requirements.txt
+
+  container-scan:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        component: [backend, frontend, ai-engine]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: docker build -t ${{ matrix.component }}:latest ./${{ matrix.component }}
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ matrix.component }}:latest'
+        format: 'sarif'
+        output: 'trivy-${{ matrix.component }}.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-${{ matrix.component }}.sarif'
+
+  sast-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v2
+      with:
+        languages: javascript, python
+    
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v2
+    
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+
+  sonarcloud-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies and run tests
+      run: |
+        cd backend && npm ci && npm test
+        cd ../frontend && npm ci && npm test
+    
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  license-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Install license-checker
+      run: npm install -g license-checker
+    
+    - name: Check Backend Licenses
+      working-directory: ./backend
+      run: |
+        npm ci
+        license-checker --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC'
+    
+    - name: Check Frontend Licenses
+      working-directory: ./frontend
+      run: |
+        npm ci
+        license-checker --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC'
+
+  security-policy-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check Security Policy
+      run: |
+        if [ ! -f SECURITY.md ]; then
+          echo "⚠️ SECURITY.md file not found"
+          exit 1
+        fi
+        echo "✅ Security policy found"
+    
+    - name: Validate security configurations
+      run: |
+        find . -name "*.yaml" -o -name "*.yml" | xargs grep -l "security" || true
+        find . -name "Dockerfile*" | xargs grep -l "USER" || echo "⚠️ No USER directive found in Dockerfiles"
+
+  compliance-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run compliance checks
+      run: |
+        echo "Running compliance checks..."
+        
+        # Check for required security files
+        files=("SECURITY.md" ".github/SECURITY.md" "security/README.md")
+        for file in "${files[@]}"; do
+          if [ -f "$file" ]; then
+            echo "✅ Found $file"
+            break
+          fi
+        done
+        
+        # Check for secure defaults in configurations
+        echo "Checking for secure defaults..."
+        find . -name "*.env*" -type f | head -5 | while read file; do
+          echo "⚠️ Environment file found: $file (ensure no secrets are committed)"
+        done
+
+  security-report:
+    needs: [secret-scan, dependency-scan, container-scan, sast-scan, license-check, security-policy-check, compliance-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Generate Security Report
+      run: |
+        echo "# Security Pipeline Report" > security-report.md
+        echo "Date: $(date)" >> security-report.md
+        echo "Commit: ${{ github.sha }}" >> security-report.md
+        echo "" >> security-report.md
+        echo "## Job Status" >> security-report.md
+        echo "- Secret Scan: ${{ needs.secret-scan.result }}" >> security-report.md
+        echo "- Dependency Scan: ${{ needs.dependency-scan.result }}" >> security-report.md
+        echo "- Container Scan: ${{ needs.container-scan.result }}" >> security-report.md
+        echo "- SAST Scan: ${{ needs.sast-scan.result }}" >> security-report.md
+        echo "- License Check: ${{ needs.license-check.result }}" >> security-report.md
+        echo "- Security Policy Check: ${{ needs.security-policy-check.result }}" >> security-report.md
+        echo "- Compliance Scan: ${{ needs.compliance-scan.result }}" >> security-report.md
+    
+    - name: Upload Security Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-report
+        path: security-report.md
