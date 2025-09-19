@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: myco-platform
+
+resources:
+  - namespace.yaml
+  - storage.yaml
+  - secrets.yaml
+  - configmap.yaml
+  - postgres.yaml
+  - deployments.yaml
+  - services.yaml
+  - monitoring.yaml
+
+commonLabels:
+  app.kubernetes.io/name: myco-platform
+  app.kubernetes.io/version: "1.0.0"
+  app.kubernetes.io/managed-by: kustomize
+
+images:
+  - name: myco/backend
+    newTag: latest
+  - name: myco/frontend
+    newTag: latest
+  - name: myco/ai-engine
+    newTag: latest

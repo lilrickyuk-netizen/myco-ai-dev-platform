@@ -111,6 +111,15 @@ class LLMManager:
         
         if not self.providers:
             self.logger.warning("No LLM providers initialized. Check API keys.")
+            # Add stub provider for development/testing
+            self.providers[LLMProvider.LOCAL] = "stub"
+            self.configs[LLMProvider.LOCAL] = LLMConfig(
+                provider=LLMProvider.LOCAL,
+                model="stub-model",
+                api_key=None
+            )
+            self.default_provider = LLMProvider.LOCAL
+            self.logger.info("Stub provider initialized for development")
     
     async def generate(
         self, 
@@ -147,6 +156,8 @@ class LLMManager:
                 return await self._generate_cohere(full_prompt, config)
             elif provider == LLMProvider.GOOGLE:
                 return await self._generate_google(full_prompt, config)
+            elif provider == LLMProvider.LOCAL:
+                return await self._generate_stub(full_prompt, config)
             else:
                 raise ValueError(f"Unsupported provider: {provider}")
         
@@ -176,6 +187,9 @@ class LLMManager:
                     yield chunk
             elif provider == LLMProvider.ANTHROPIC:
                 async for chunk in self._stream_anthropic(full_prompt, config):
+                    yield chunk
+            elif provider == LLMProvider.LOCAL:
+                async for chunk in self._stream_stub(full_prompt, config):
                     yield chunk
             else:
                 # Fallback to non-streaming for providers that don't support it
@@ -436,6 +450,49 @@ Please provide:
             LLMProvider.GOOGLE: ["gemini-pro", "gemini-pro-vision"]
         }
         return model_map.get(provider, [])
+    
+    async def _generate_stub(self, prompt: str, config: LLMConfig) -> LLMResponse:
+        """Generate stub response for development/testing when no API keys available"""
+        await asyncio.sleep(0.1)  # Simulate API delay
+        
+        # Return a helpful stub response based on the prompt
+        stub_content = f"""This is a stub response from the local development provider.
+
+Original prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}
+
+In a production environment with API keys configured, this would return:
+- Generated code based on your requirements
+- AI-powered suggestions and explanations
+- Context-aware responses from OpenAI, Anthropic, Google, or Cohere
+
+Configure API keys in your environment to enable full functionality:
+- OPENAI_API_KEY for OpenAI GPT models
+- ANTHROPIC_API_KEY for Claude models  
+- GOOGLE_API_KEY for Gemini models
+- COHERE_API_KEY for Command models
+
+For now, this stub allows the service to run and be tested without API keys."""
+
+        return LLMResponse(
+            content=stub_content,
+            usage={
+                "prompt_tokens": len(prompt.split()),
+                "completion_tokens": len(stub_content.split()),
+                "total_tokens": len(prompt.split()) + len(stub_content.split())
+            },
+            model="stub-model",
+            finish_reason="stop",
+            metadata={"provider": "local", "stub": True}
+        )
+    
+    async def _stream_stub(self, prompt: str, config: LLMConfig) -> AsyncGenerator[str, None]:
+        """Stream stub response for development"""
+        stub_content = await self._generate_stub(prompt, config)
+        words = stub_content.content.split()
+        
+        for word in words:
+            await asyncio.sleep(0.05)  # Simulate streaming delay
+            yield word + " "
     
     async def health_check(self) -> Dict[str, Any]:
         """Check health of all providers"""
