@@ -552,7 +552,7 @@ export class DockerManager extends EventEmitter {
 
     // Clean up temp directory
     try {
-      await fs.rmdir(this.tempDir, { recursive: true });
+      await fs.rm(this.tempDir, { recursive: true, force: true });
     } catch (error) {
       console.error('Failed to cleanup temp directory:', error);
     }
