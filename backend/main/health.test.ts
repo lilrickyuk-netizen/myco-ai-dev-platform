@@ -24,7 +24,7 @@ describe('Health Service', () => {
       expect(result).toHaveProperty('timestamp');
       expect(result).toHaveProperty('uptime');
       expect(result).toHaveProperty('version');
-      expect(result.services.database).toBe('healthy');
+      expect(result.environment.database).toBe('connected');
     });
 
     it('should return unhealthy status when database fails', async () => {
@@ -35,7 +35,7 @@ describe('Health Service', () => {
       const result = await health();
 
       expect(result.status).toBe('unhealthy');
-      expect(result.services.database).toBe('unhealthy');
+      expect(result.environment.database).toBe('disconnected');
     });
 
     it('should include service details', async () => {

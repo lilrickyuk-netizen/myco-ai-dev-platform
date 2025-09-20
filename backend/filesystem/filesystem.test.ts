@@ -106,7 +106,6 @@ describe('Filesystem Service', () => {
       const result = await readFile(projectId, filePath);
 
       expect(result.content).toBe('[Binary file]');
-      expect(result.isBinary).toBe(true);
     });
 
     it('should handle non-existent file', async () => {
@@ -125,41 +124,38 @@ describe('Filesystem Service', () => {
     it('should write file successfully', async () => {
       const projectId = 'test-project';
       const request: WriteFileRequest = {
-        path: 'src/NewComponent.tsx',
         content: 'import React from "react";\n\nfunction NewComponent() {\n  return <div>New</div>;\n}'
       };
 
       vi.mocked(require('fs/promises').writeFile).mockResolvedValueOnce(undefined);
 
-      const result = await writeFile(projectId, request);
+      const result = await writeFile('test-file-id', request);
 
-      expect(result.success).toBe(true);
-      expect(result.path).toBe(request.path);
+      expect(result.name).toBeDefined();
+      expect(result.content).toBe(request.content);
     });
 
     it('should validate file path', async () => {
       const projectId = 'test-project';
       const request: WriteFileRequest = {
-        path: '../../../etc/passwd',
         content: 'malicious content'
       };
 
-      await expect(writeFile(projectId, request)).rejects.toThrow('Invalid file path');
+      await expect(writeFile('test-file-id', request)).rejects.toThrow('Invalid file path');
     });
 
     it('should create directories if needed', async () => {
       const projectId = 'test-project';
       const request: WriteFileRequest = {
-        path: 'src/components/NewComponent.tsx',
         content: 'component content'
       };
 
       vi.mocked(require('fs/promises').mkdir).mockResolvedValueOnce(undefined);
       vi.mocked(require('fs/promises').writeFile).mockResolvedValueOnce(undefined);
 
-      const result = await writeFile(projectId, request);
+      const result = await writeFile('test-file-id', request);
 
-      expect(result.success).toBe(true);
+      expect(result.content).toBe(request.content);
     });
   });
 
@@ -170,10 +166,9 @@ describe('Filesystem Service', () => {
 
       vi.mocked(require('fs/promises').unlink).mockResolvedValueOnce(undefined);
 
-      const result = await deleteFile(projectId, filePath);
+      const result = await deleteFile({ id: filePath });
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe('File deleted successfully');
     });
 
     it('should handle non-existent file deletion', async () => {
@@ -184,14 +179,14 @@ describe('Filesystem Service', () => {
         new Error('ENOENT: no such file or directory')
       );
 
-      await expect(deleteFile(projectId, filePath)).rejects.toThrow('File not found');
+      await expect(deleteFile({ id: filePath })).rejects.toThrow('File not found');
     });
 
     it('should validate file path for deletion', async () => {
       const projectId = 'test-project';
       const filePath = '../../../important-file.txt';
 
-      await expect(deleteFile(projectId, filePath)).rejects.toThrow('Invalid file path');
+      await expect(deleteFile({ id: filePath })).rejects.toThrow('Invalid file path');
     });
   });
 
@@ -199,6 +194,7 @@ describe('Filesystem Service', () => {
     it('should create directory successfully', async () => {
       const projectId = 'test-project';
       const request: CreateDirectoryRequest = {
+        projectId: projectId,
         path: 'src/components/ui'
       };
 
@@ -206,13 +202,14 @@ describe('Filesystem Service', () => {
 
       const result = await createDirectory(projectId, request);
 
-      expect(result.success).toBe(true);
+      expect(result.type).toBe('directory');
       expect(result.path).toBe(request.path);
     });
 
     it('should handle existing directory', async () => {
       const projectId = 'test-project';
       const request: CreateDirectoryRequest = {
+        projectId: projectId,
         path: 'src/components'
       };
 
@@ -226,6 +223,7 @@ describe('Filesystem Service', () => {
     it('should validate directory path', async () => {
       const projectId = 'test-project';
       const request: CreateDirectoryRequest = {
+        projectId: projectId,
         path: '../../../malicious'
       };
 

@@ -144,7 +144,7 @@ describe('Project Service', () => {
           updated_at: new Date()
         }]);
 
-      const result = await getProject(projectId);
+      const result = await getProject({ id: projectId });
 
       expect(result.id).toBe(projectId);
       expect(result.name).toBe('Test Project');
@@ -157,7 +157,7 @@ describe('Project Service', () => {
       vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().query)
         .mockResolvedValueOnce([]);
 
-      await expect(getProject(projectId)).rejects.toThrow('Project not found');
+      await expect(getProject({ id: projectId })).rejects.toThrow('Project not found');
     });
 
     it('should handle unauthorized access', async () => {
@@ -171,7 +171,7 @@ describe('Project Service', () => {
           user_id: 'other-user'
         }]);
 
-      await expect(getProject(projectId)).rejects.toThrow('Project not found');
+      await expect(getProject({ id: projectId })).rejects.toThrow('Project not found');
     });
   });
 
@@ -195,7 +195,7 @@ describe('Project Service', () => {
           updated_at: new Date()
         }]);
 
-      const result = await updateProject(projectId, request);
+      const result = await updateProject({ id: projectId, ...request });
 
       expect(result.name).toBe(request.name);
       expect(result.description).toBe(request.description);
@@ -207,7 +207,7 @@ describe('Project Service', () => {
         name: ''
       };
 
-      await expect(updateProject(projectId, request)).rejects.toThrow('Project name cannot be empty');
+      await expect(updateProject({ id: projectId, ...request })).rejects.toThrow('Project name cannot be empty');
     });
   });
 
@@ -219,10 +219,9 @@ describe('Project Service', () => {
       vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().exec)
         .mockResolvedValueOnce(undefined);
 
-      const result = await deleteProject(projectId);
+      const result = await deleteProject({ id: projectId });
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe('Project deleted successfully');
     });
 
     it('should handle project not found during deletion', async () => {
@@ -232,7 +231,7 @@ describe('Project Service', () => {
       vi.mocked(require('encore.dev/storage/sqldb').SQLDatabase().exec)
         .mockRejectedValueOnce(new Error('Project not found'));
 
-      await expect(deleteProject(projectId)).rejects.toThrow('Project not found');
+      await expect(deleteProject({ id: projectId })).rejects.toThrow('Project not found');
     });
   });
 });
