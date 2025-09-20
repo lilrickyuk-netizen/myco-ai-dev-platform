@@ -18,14 +18,21 @@
     "@fastify/helmet": "^11.1.1",
     "typescript": "^5.0.0",
     "@types/node": "^20.0.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.0",
+    "handlebars": "^4.7.8",
+    "js-yaml": "^4.1.0",
+    "glob": "^10.3.0"
   },
   "devDependencies": {
     "vitest": "^1.0.0",
     "eslint": "^8.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
-    "tsx": "^4.6.0"
+    "tsx": "^4.6.0",
+    "@types/uuid": "^9.0.0",
+    "@types/js-yaml": "^4.0.5",
+    "@types/glob": "^8.1.0"
   },
   "jest": {
     "preset": "ts-jest",

@@ -33,8 +33,14 @@ const BROWSER = typeof globalThis === "object" && ("window" in globalThis);
  * Client is an API client for the  Encore application.
  */
 export class Client {
+    public readonly agent_monitor: agent_monitor.ServiceClient
+    public readonly ai: ai.ServiceClient
     public readonly auth: auth.ServiceClient
+    public readonly billing: billing.ServiceClient
+    public readonly entitlements: entitlements.ServiceClient
+    public readonly filesystem: filesystem.ServiceClient
     public readonly main: main.ServiceClient
+    public readonly project: project.ServiceClient
     private readonly options: ClientOptions
     private readonly target: string
 
@@ -49,8 +55,14 @@ export class Client {
         this.target = target
         this.options = options ?? {}
         const base = new BaseClient(this.target, this.options)
+        this.agent_monitor = new agent_monitor.ServiceClient(base)
+        this.ai = new ai.ServiceClient(base)
         this.auth = new auth.ServiceClient(base)
+        this.billing = new billing.ServiceClient(base)
+        this.entitlements = new entitlements.ServiceClient(base)
+        this.filesystem = new filesystem.ServiceClient(base)
         this.main = new main.ServiceClient(base)
+        this.project = new project.ServiceClient(base)
     }
 
     /**
@@ -96,6 +108,144 @@ export interface ClientOptions {
 /**
  * Import the endpoint handlers to derive the types for the client.
  */
+import {
+    getDashboardState as api_agent_monitor_monitor_getDashboardState,
+    progressStream as api_agent_monitor_monitor_progressStream
+} from "~backend/agent-monitor/monitor";
+import { startSimulation as api_agent_monitor_simulator_startSimulation } from "~backend/agent-monitor/simulator";
+import {
+    createWorkflow as api_agent_monitor_workflow_createWorkflow,
+    getDependencyGraph as api_agent_monitor_workflow_getDependencyGraph,
+    getWorkflow as api_agent_monitor_workflow_getWorkflow,
+    startWorkflow as api_agent_monitor_workflow_startWorkflow
+} from "~backend/agent-monitor/workflow";
+
+export namespace agent_monitor {
+
+    export class ServiceClient {
+        private baseClient: BaseClient
+
+        constructor(baseClient: BaseClient) {
+            this.baseClient = baseClient
+            this.createWorkflow = this.createWorkflow.bind(this)
+            this.getDashboardState = this.getDashboardState.bind(this)
+            this.getDependencyGraph = this.getDependencyGraph.bind(this)
+            this.getWorkflow = this.getWorkflow.bind(this)
+            this.progressStream = this.progressStream.bind(this)
+            this.startSimulation = this.startSimulation.bind(this)
+            this.startWorkflow = this.startWorkflow.bind(this)
+        }
+
+        /**
+         * Create a new workflow with agents and dependencies
+         */
+        public async createWorkflow(params: RequestType<typeof api_agent_monitor_workflow_createWorkflow>): Promise<ResponseType<typeof api_agent_monitor_workflow_createWorkflow>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/agent-monitor/workflows`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agent_monitor_workflow_createWorkflow>
+        }
+
+        /**
+         * Get current dashboard state
+         */
+        public async getDashboardState(): Promise<ResponseType<typeof api_agent_monitor_monitor_getDashboardState>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/agent-monitor/dashboard`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agent_monitor_monitor_getDashboardState>
+        }
+
+        /**
+         * Get dependency graph for workflow visualization
+         */
+        public async getDependencyGraph(params: { workflowId: string }): Promise<ResponseType<typeof api_agent_monitor_workflow_getDependencyGraph>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/agent-monitor/workflows/${encodeURIComponent(params.workflowId)}/graph`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agent_monitor_workflow_getDependencyGraph>
+        }
+
+        /**
+         * Get detailed workflow information
+         */
+        public async getWorkflow(params: { workflowId: string }): Promise<ResponseType<typeof api_agent_monitor_workflow_getWorkflow>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/agent-monitor/workflows/${encodeURIComponent(params.workflowId)}`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agent_monitor_workflow_getWorkflow>
+        }
+
+        /**
+         * Real-time progress stream for agent updates
+         */
+        public async progressStream(params: RequestType<typeof api_agent_monitor_monitor_progressStream>): Promise<StreamIn<StreamResponse<typeof api_agent_monitor_monitor_progressStream>>> {
+            // Convert our params into the objects we need for the request
+            const query = makeRecord<string, string | string[]>({
+                workflowId: params.workflowId,
+            })
+
+            return await this.baseClient.createStreamIn(`/agent-monitor/progress`, {query})
+        }
+
+        /**
+         * Create and start a simulated multi-agent workflow
+         */
+        public async startSimulation(params: RequestType<typeof api_agent_monitor_simulator_startSimulation>): Promise<ResponseType<typeof api_agent_monitor_simulator_startSimulation>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/agent-monitor/simulate`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agent_monitor_simulator_startSimulation>
+        }
+
+        /**
+         * Start a workflow execution
+         */
+        public async startWorkflow(params: { workflowId: string }): Promise<ResponseType<typeof api_agent_monitor_workflow_startWorkflow>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/agent-monitor/workflows/${encodeURIComponent(params.workflowId)}/start`, {method: "POST", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_agent_monitor_workflow_startWorkflow>
+        }
+    }
+}
+
+/**
+ * Import the endpoint handlers to derive the types for the client.
+ */
+import {
+    chat as api_ai_ai_chat,
+    generate as api_ai_ai_generate
+} from "~backend/ai/ai";
+
+export namespace ai {
+
+    export class ServiceClient {
+        private baseClient: BaseClient
+
+        constructor(baseClient: BaseClient) {
+            this.baseClient = baseClient
+            this.chat = this.chat.bind(this)
+            this.generate = this.generate.bind(this)
+        }
+
+        /**
+         * Handles multi-turn chat conversations with context.
+         */
+        public async chat(params: RequestType<typeof api_ai_ai_chat>): Promise<ResponseType<typeof api_ai_ai_chat>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/ai/chat`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_ai_ai_chat>
+        }
+
+        /**
+         * Generates AI responses using the AI engine service.
+         */
+        public async generate(params: RequestType<typeof api_ai_ai_generate>): Promise<ResponseType<typeof api_ai_ai_generate>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/ai/generate`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_ai_ai_generate>
+        }
+    }
+}
+
+/**
+ * Import the endpoint handlers to derive the types for the client.
+ */
 import { health as api_auth_health_health } from "~backend/auth/health";
 import { getUserInfo as api_auth_user_getUserInfo } from "~backend/auth/user";
 
@@ -130,7 +280,185 @@ export namespace auth {
 /**
  * Import the endpoint handlers to derive the types for the client.
  */
-import { health as api_main_health_health } from "~backend/main/health";
+import { createCheckout as api_billing_create_checkout_createCheckout } from "~backend/billing/create_checkout";
+import { getSubscription as api_billing_get_subscription_getSubscription } from "~backend/billing/get_subscription";
+import { webhook as api_billing_webhook_webhook } from "~backend/billing/webhook";
+
+export namespace billing {
+
+    export class ServiceClient {
+        private baseClient: BaseClient
+
+        constructor(baseClient: BaseClient) {
+            this.baseClient = baseClient
+            this.createCheckout = this.createCheckout.bind(this)
+            this.getSubscription = this.getSubscription.bind(this)
+            this.webhook = this.webhook.bind(this)
+        }
+
+        /**
+         * Creates a Stripe checkout session for subscription billing
+         */
+        public async createCheckout(params: RequestType<typeof api_billing_create_checkout_createCheckout>): Promise<ResponseType<typeof api_billing_create_checkout_createCheckout>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/billing/create-checkout`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_billing_create_checkout_createCheckout>
+        }
+
+        /**
+         * Gets the current subscription status for the authenticated user
+         */
+        public async getSubscription(): Promise<ResponseType<typeof api_billing_get_subscription_getSubscription>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/billing/subscription`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_billing_get_subscription_getSubscription>
+        }
+
+        /**
+         * Handles Stripe webhook events for billing updates
+         */
+        public async webhook(params: RequestType<typeof api_billing_webhook_webhook>): Promise<ResponseType<typeof api_billing_webhook_webhook>> {
+            // Convert our params into the objects we need for the request
+            const headers = makeRecord<string, string>({
+                "stripe-signature": params.stripeSignature,
+            })
+
+            // Construct the body with only the fields which we want encoded within the body (excluding query string or header fields)
+            const body: Record<string, any> = {
+                data: params.data,
+                id:   params.id,
+                type: params.type,
+            }
+
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/billing/webhook`, {headers, method: "POST", body: JSON.stringify(body)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_billing_webhook_webhook>
+        }
+    }
+}
+
+/**
+ * Import the endpoint handlers to derive the types for the client.
+ */
+import { check as api_entitlements_check_check } from "~backend/entitlements/check";
+import { getUserEntitlements as api_entitlements_get_user_entitlements_getUserEntitlements } from "~backend/entitlements/get_user_entitlements";
+
+export namespace entitlements {
+
+    export class ServiceClient {
+        private baseClient: BaseClient
+
+        constructor(baseClient: BaseClient) {
+            this.baseClient = baseClient
+            this.check = this.check.bind(this)
+            this.getUserEntitlements = this.getUserEntitlements.bind(this)
+        }
+
+        /**
+         * Checks if a user has access to a specific feature based on their subscription plan
+         */
+        public async check(params: RequestType<typeof api_entitlements_check_check>): Promise<ResponseType<typeof api_entitlements_check_check>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/entitlements/check`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_entitlements_check_check>
+        }
+
+        /**
+         * Gets all entitlements for the authenticated user
+         */
+        public async getUserEntitlements(): Promise<ResponseType<typeof api_entitlements_get_user_entitlements_getUserEntitlements>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/entitlements/user`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_entitlements_get_user_entitlements_getUserEntitlements>
+        }
+    }
+}
+
+/**
+ * Import the endpoint handlers to derive the types for the client.
+ */
+import {
+    createFileAPI as api_filesystem_filesystem_createFileAPI,
+    deleteFileAPI as api_filesystem_filesystem_deleteFileAPI,
+    getFileAPI as api_filesystem_filesystem_getFileAPI,
+    listFilesAPI as api_filesystem_filesystem_listFilesAPI,
+    updateFileAPI as api_filesystem_filesystem_updateFileAPI
+} from "~backend/filesystem/filesystem";
+
+export namespace filesystem {
+
+    export class ServiceClient {
+        private baseClient: BaseClient
+
+        constructor(baseClient: BaseClient) {
+            this.baseClient = baseClient
+            this.createFileAPI = this.createFileAPI.bind(this)
+            this.deleteFileAPI = this.deleteFileAPI.bind(this)
+            this.getFileAPI = this.getFileAPI.bind(this)
+            this.listFilesAPI = this.listFilesAPI.bind(this)
+            this.updateFileAPI = this.updateFileAPI.bind(this)
+        }
+
+        /**
+         * Creates a new file or directory.
+         */
+        public async createFileAPI(params: RequestType<typeof api_filesystem_filesystem_createFileAPI>): Promise<ResponseType<typeof api_filesystem_filesystem_createFileAPI>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/filesystem/file`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_filesystem_filesystem_createFileAPI>
+        }
+
+        /**
+         * Deletes a file or directory and all its children.
+         */
+        public async deleteFileAPI(params: { id: string }): Promise<ResponseType<typeof api_filesystem_filesystem_deleteFileAPI>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/filesystem/file/${encodeURIComponent(params.id)}`, {method: "DELETE", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_filesystem_filesystem_deleteFileAPI>
+        }
+
+        /**
+         * Gets a specific file by ID.
+         */
+        public async getFileAPI(params: { id: string }): Promise<ResponseType<typeof api_filesystem_filesystem_getFileAPI>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/filesystem/file/${encodeURIComponent(params.id)}`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_filesystem_filesystem_getFileAPI>
+        }
+
+        /**
+         * Lists all files in a project as a hierarchical tree structure.
+         */
+        public async listFilesAPI(params: { projectId: string }): Promise<ResponseType<typeof api_filesystem_filesystem_listFilesAPI>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/filesystem/${encodeURIComponent(params.projectId)}`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_filesystem_filesystem_listFilesAPI>
+        }
+
+        /**
+         * Updates an existing file's content or metadata.
+         */
+        public async updateFileAPI(params: RequestType<typeof api_filesystem_filesystem_updateFileAPI>): Promise<ResponseType<typeof api_filesystem_filesystem_updateFileAPI>> {
+            // Construct the body with only the fields which we want encoded within the body (excluding query string or header fields)
+            const body: Record<string, any> = {
+                content: params.content,
+            }
+
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/filesystem/file/${encodeURIComponent(params.id)}`, {method: "PUT", body: JSON.stringify(body)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_filesystem_filesystem_updateFileAPI>
+        }
+    }
+}
+
+/**
+ * Import the endpoint handlers to derive the types for the client.
+ */
+import {
+    health as api_main_health_health,
+    ready as api_main_health_ready
+} from "~backend/main/health";
+import { metricsEndpoint as api_main_metrics_metricsEndpoint } from "~backend/main/metrics";
 
 export namespace main {
 
@@ -140,12 +468,117 @@ export namespace main {
         constructor(baseClient: BaseClient) {
             this.baseClient = baseClient
             this.health = this.health.bind(this)
+            this.metricsEndpoint = this.metricsEndpoint.bind(this)
+            this.ready = this.ready.bind(this)
         }
 
+        /**
+         * Global health check for the entire platform.
+         */
         public async health(): Promise<ResponseType<typeof api_main_health_health>> {
             // Now make the actual call to the API
             const resp = await this.baseClient.callTypedAPI(`/health`, {method: "GET", body: undefined})
             return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_main_health_health>
+        }
+
+        /**
+         * Metrics endpoint for Prometheus scraping
+         */
+        public async metricsEndpoint(): Promise<ResponseType<typeof api_main_metrics_metricsEndpoint>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/metrics`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_main_metrics_metricsEndpoint>
+        }
+
+        /**
+         * Readiness check to determine if the service can handle traffic.
+         */
+        public async ready(): Promise<ResponseType<typeof api_main_health_ready>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/ready`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_main_health_ready>
+        }
+    }
+}
+
+/**
+ * Import the endpoint handlers to derive the types for the client.
+ */
+import {
+    create as api_project_project_create,
+    get as api_project_project_get,
+    list as api_project_project_list,
+    remove as api_project_project_remove,
+    update as api_project_project_update
+} from "~backend/project/project";
+
+export namespace project {
+
+    export class ServiceClient {
+        private baseClient: BaseClient
+
+        constructor(baseClient: BaseClient) {
+            this.baseClient = baseClient
+            this.create = this.create.bind(this)
+            this.get = this.get.bind(this)
+            this.list = this.list.bind(this)
+            this.remove = this.remove.bind(this)
+            this.update = this.update.bind(this)
+        }
+
+        /**
+         * Creates a new project for the authenticated user.
+         */
+        public async create(params: RequestType<typeof api_project_project_create>): Promise<ResponseType<typeof api_project_project_create>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/projects`, {method: "POST", body: JSON.stringify(params)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_project_project_create>
+        }
+
+        /**
+         * Gets a specific project by ID.
+         */
+        public async get(params: { id: string }): Promise<ResponseType<typeof api_project_project_get>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/projects/${encodeURIComponent(params.id)}`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_project_project_get>
+        }
+
+        /**
+         * Lists all projects accessible to the authenticated user.
+         */
+        public async list(): Promise<ResponseType<typeof api_project_project_list>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/projects`, {method: "GET", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_project_project_list>
+        }
+
+        /**
+         * Deletes a project (only accessible to project owner).
+         */
+        public async remove(params: { id: string }): Promise<ResponseType<typeof api_project_project_remove>> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/projects/${encodeURIComponent(params.id)}`, {method: "DELETE", body: undefined})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_project_project_remove>
+        }
+
+        /**
+         * Updates an existing project.
+         */
+        public async update(params: RequestType<typeof api_project_project_update>): Promise<ResponseType<typeof api_project_project_update>> {
+            // Construct the body with only the fields which we want encoded within the body (excluding query string or header fields)
+            const body: Record<string, any> = {
+                deployUrl:     params.deployUrl,
+                description:   params.description,
+                name:          params.name,
+                repositoryUrl: params.repositoryUrl,
+                status:        params.status,
+                visibility:    params.visibility,
+            }
+
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI(`/projects/${encodeURIComponent(params.id)}`, {method: "PUT", body: JSON.stringify(body)})
+            return JSON.parse(await resp.text(), dateReviver) as ResponseType<typeof api_project_project_update>
         }
     }
 }

@@ -487,7 +487,7 @@ export class TemplateEngine extends EventEmitter {
 
   private evaluateExpression(expression: string, context: GenerationContext): string {
     // Create a safe evaluation context
-    const safeContext = {
+    const safeContext: Record<string, any> = {
       ...context.variables,
       ...context.helpers,
       projectName: context.projectName,
