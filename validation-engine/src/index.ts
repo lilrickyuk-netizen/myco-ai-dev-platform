@@ -52,7 +52,7 @@ function validateWithAjv(schema: any, data: any) {
     return {
       valid,
       errors: valid ? [] : (validate.errors || []).map(error => ({
-        path: error.instancePath || error.dataPath || '',
+        path: error.instancePath || '',
         message: error.message || 'Validation error',
         code: error.keyword || 'validation_error'
       }))
