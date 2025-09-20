@@ -62,7 +62,7 @@ export default function AgentDashboard({ className }: AgentDashboardProps) {
 
   const loadDashboardState = async () => {
     try {
-      const state = await backend["agent-monitor"].getDashboardState();
+      const state = await backend.agent_monitor.getDashboardState();
       setDashboardState(state);
       if (state.workflows.length > 0 && !selectedWorkflow) {
         setSelectedWorkflow(state.workflows[0].id);
@@ -74,7 +74,7 @@ export default function AgentDashboard({ className }: AgentDashboardProps) {
 
   const loadDependencyGraph = async (workflowId: string) => {
     try {
-      const graph = await backend["agent-monitor"].getDependencyGraph({ workflowId });
+      const graph = await backend.agent_monitor.getDependencyGraph({ workflowId });
       setDependencyGraph(graph);
     } catch (error) {
       console.error('Failed to load dependency graph:', error);
@@ -83,7 +83,7 @@ export default function AgentDashboard({ className }: AgentDashboardProps) {
 
   const connectToProgressStream = async () => {
     try {
-      const stream = await backend["agent-monitor"].progressStream({});
+      const stream = await backend.agent_monitor.progressStream({});
       streamRef.current = stream;
       setIsConnected(true);
 

@@ -19,13 +19,13 @@ const queryClient = new QueryClient({
       retry: config.queryClient.retryCount,
       refetchOnWindowFocus: false,
       staleTime: config.queryClient.defaultStaleTime,
-      cacheTime: config.queryClient.defaultCacheTime,
+      gcTime: config.queryClient.defaultCacheTime,
     },
   },
 });
 
 // Configure API client
-apiClient.setBaseUrl(config.apiBaseUrl);
+// Note: API client base URL is configured through the backend client
 
 // Simple Auth Context
 const AuthContext = createContext<{
