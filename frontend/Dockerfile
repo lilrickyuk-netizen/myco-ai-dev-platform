@@ -1,8 +1,8 @@
 # Frontend Dockerfile - React + Vite Application
 FROM node:20-alpine
 
-# Install curl for health checks
-RUN apk add --no-cache curl
+# Install curl and wget for health checks
+RUN apk add --no-cache curl wget
 
 # Set working directory
 WORKDIR /app
@@ -10,8 +10,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies with fallback for missing lockfile
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
 
 # Copy source code
 COPY . .

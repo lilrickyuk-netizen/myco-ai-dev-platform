@@ -7,14 +7,11 @@ RUN apk add --no-cache curl
 # Set working directory
 WORKDIR /app
 
-# Install Encore CLI globally
-RUN npm install -g @encore.dev/encore@latest
-
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies with fallback for missing lockfile
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
 
 # Copy source code
 COPY . .
@@ -30,11 +27,11 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
-EXPOSE 3001
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3001/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Start the application
-CMD ["encore", "run", "--port", "3001"]
+CMD ["npm", "start"]
