@@ -9,20 +9,20 @@ describe("Agent Monitor Service", () => {
 
   beforeAll(async () => {
     // Create test workflow
-    const workflow = await db.query`
+    const workflow = await db.queryRow`
       INSERT INTO workflows (project_id, current_phase)
       VALUES ('test-project-123', 'Testing')
       RETURNING id
     `;
-    testWorkflowId = workflow[0].id;
+    testWorkflowId = workflow?.id;
 
     // Create test agent
-    const agent = await db.query`
+    const agent = await db.queryRow`
       INSERT INTO agents (workflow_id, name, type)
       VALUES (${testWorkflowId}, 'Test Agent', 'backend')
       RETURNING id
     `;
-    testAgentId = agent[0].id;
+    testAgentId = agent?.id;
   });
 
   afterAll(async () => {
@@ -31,13 +31,13 @@ describe("Agent Monitor Service", () => {
   });
 
   it("should create workflow with agents", async () => {
-    const workflow = await db.query`
+    const workflow = await db.queryRow`
       SELECT * FROM workflows WHERE id = ${testWorkflowId}
     `;
     
-    expect(workflow.length).toBe(1);
-    expect(workflow[0].project_id).toBe('test-project-123');
-    expect(workflow[0].status).toBe('pending');
+    expect(workflow).toBeTruthy();
+    expect(workflow?.project_id).toBe('test-project-123');
+    expect(workflow?.status).toBe('pending');
   });
 
   it("should track agent progress", async () => {
@@ -48,12 +48,12 @@ describe("Agent Monitor Service", () => {
       WHERE id = ${testAgentId}
     `;
 
-    const agent = await db.query`
+    const agent = await db.queryRow`
       SELECT * FROM agents WHERE id = ${testAgentId}
     `;
 
-    expect(agent[0].progress).toBe(50);
-    expect(agent[0].status).toBe('running');
+    expect(agent?.progress).toBe(50);
+    expect(agent?.status).toBe('running');
   });
 
   it("should record progress updates", async () => {
@@ -65,7 +65,7 @@ describe("Agent Monitor Service", () => {
       VALUES (${testWorkflowId}, ${testAgentId}, 75, 'running', 'Test progress update')
     `;
 
-    const updates = await db.query`
+    const updates = await db.queryAll`
       SELECT * FROM agent_progress_updates 
       WHERE workflow_id = ${testWorkflowId}
       ORDER BY created_at DESC
@@ -87,13 +87,13 @@ describe("Agent Monitor Service", () => {
     `;
 
     // Calculate total progress (should be average of all agents)
-    const agents = await db.query`
+    const agents = await db.queryRow`
       SELECT AVG(progress) as avg_progress
       FROM agents 
       WHERE workflow_id = ${testWorkflowId}
     `;
 
-    const avgProgress = Math.round(agents[0].avg_progress);
+    const avgProgress = Math.round(agents?.avg_progress || 0);
     expect(avgProgress).toBeGreaterThan(0);
     expect(avgProgress).toBeLessThanOrEqual(100);
   });

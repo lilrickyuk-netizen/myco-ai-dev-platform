@@ -20,12 +20,15 @@ export interface RegisterRequest {
   password: string;
   firstName?: string;
   lastName?: string;
+  name?: string;  // Legacy support for tests
 }
 
 export interface UpdateProfileRequest {
   firstName?: string;
   lastName?: string;
   imageUrl?: string;
+  name?: string;  // Legacy support for tests
+  email?: string; // Legacy support for tests
 }
 
 // Gets the current user's information.

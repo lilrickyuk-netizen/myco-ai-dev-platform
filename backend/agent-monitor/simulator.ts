@@ -21,12 +21,12 @@ export const startSimulation = api<SimulationRequest, SimulationResponse>(
     const speed = req.speed || 1;
     
     // Create a sample workflow
-    const workflow = await db.queryAll`
+    const workflow = await db.queryRow`
       INSERT INTO workflows (project_id, current_phase, status)
       VALUES (${req.projectId}, 'Planning', 'running')
       RETURNING id
     `;
-    const workflowId = workflow[0].id;
+    const workflowId = workflow?.id;
 
     // Create phases
     const phases = [

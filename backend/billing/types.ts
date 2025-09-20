@@ -1,4 +1,28 @@
+// Database row interfaces (snake_case)
 export interface Customer {
+  id: number;
+  user_id: string;
+  stripe_customer_id?: string;
+  email: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface Subscription {
+  id: number;
+  customer_id: number;
+  stripe_subscription_id?: string;
+  plan: string;
+  status: string;
+  current_period_start?: Date;
+  current_period_end?: Date;
+  cancel_at_period_end: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// API response interfaces (camelCase)
+export interface CustomerResponse {
   id: number;
   userId: string;
   stripeCustomerId?: string;
@@ -7,7 +31,7 @@ export interface Customer {
   updatedAt: Date;
 }
 
-export interface Subscription {
+export interface SubscriptionResponse {
   id: number;
   customerId: number;
   stripeSubscriptionId?: string;
@@ -45,8 +69,8 @@ export interface WebhookResponse {
 }
 
 export interface GetSubscriptionResponse {
-  subscription: Subscription | null;
-  customer: Customer | null;
+  subscription: SubscriptionResponse | null;
+  customer: CustomerResponse | null;
 }
 
 export const SUBSCRIPTION_PLANS = {

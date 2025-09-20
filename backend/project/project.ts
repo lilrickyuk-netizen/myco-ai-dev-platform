@@ -365,3 +365,10 @@ export const remove = api(
     return { success: true };
   }
 );
+
+// Legacy exports for test compatibility
+export const listProjects = list;
+export const createProject = create;
+export const getProject = get;
+export const updateProject = update;
+export const deleteProject = remove;

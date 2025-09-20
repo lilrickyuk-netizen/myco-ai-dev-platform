@@ -98,7 +98,7 @@ interface GetWorkflowRequest {
 export const getWorkflow = api<GetWorkflowRequest, WorkflowStatus>(
   { expose: true, method: "GET", path: "/agent-monitor/workflows/:workflowId", auth: true },
   async (req): Promise<WorkflowStatus> => {
-    const workflow = await db.query`
+    const workflow = await db.queryRow`
       SELECT 
         id, project_id, status, progress, started_at, 
         estimated_completion_time, completed_at, current_phase
@@ -106,14 +106,14 @@ export const getWorkflow = api<GetWorkflowRequest, WorkflowStatus>(
       WHERE id = ${req.workflowId}
     `;
 
-    if (workflow.length === 0) {
+    if (!workflow) {
       throw new Error(`Workflow ${req.workflowId} not found`);
     }
 
-    const w = workflow[0];
+    const w = workflow;
 
     // Get agents
-    const agents = await db.query`
+    const agents = await db.queryAll`
       SELECT 
         a.id, a.name, a.type, a.status, a.progress, a.started_at, 
         a.completed_at, a.estimated_completion_time, a.error_message, a.outputs,
@@ -129,7 +129,7 @@ export const getWorkflow = api<GetWorkflowRequest, WorkflowStatus>(
     `;
 
     // Get phases
-    const phases = await db.query`
+    const phases = await db.queryAll`
       SELECT 
         wp.id, wp.name, wp.description, wp.status, wp.progress, 
         wp.estimated_duration, wp.actual_duration,
@@ -184,14 +184,14 @@ export const getWorkflow = api<GetWorkflowRequest, WorkflowStatus>(
 export const getDependencyGraph = api<GetWorkflowRequest, AgentDependencyGraph>(
   { expose: true, method: "GET", path: "/agent-monitor/workflows/:workflowId/graph", auth: true },
   async (req): Promise<AgentDependencyGraph> => {
-    const agents = await db.query`
+    const agents = await db.queryAll`
       SELECT id, name, type, status, progress
       FROM agents
       WHERE workflow_id = ${req.workflowId}
       ORDER BY created_at
     `;
 
-    const dependencies = await db.query`
+    const dependencies = await db.queryAll`
       SELECT agent_id as from_agent, depends_on_agent_id as to_agent
       FROM agent_dependencies ad
       WHERE EXISTS (

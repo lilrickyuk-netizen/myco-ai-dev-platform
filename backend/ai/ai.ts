@@ -96,6 +96,10 @@ export const generate = api(
 
         return {
           content,
+          code: content,
+          explanation: `Generated ${(req as any).framework || 'generic'} code`,
+          framework: (req as any).framework,
+          language: (req as any).language,
           usage
         };
       } catch (fetchError) {
@@ -127,11 +131,22 @@ export const chat = api(
     // Check if user has access to AI generation feature
     await requireFeature(FEATURES.AI_GENERATION);
 
-    if (!req.messages || !Array.isArray(req.messages) || req.messages.length === 0) {
-      throw APIError.invalidArgument("Messages array is required");
+    // Handle legacy format with single message string
+    let messages = req.messages;
+    if (!messages && req.message) {
+      messages = [{
+        id: Date.now().toString(),
+        role: 'user' as const,
+        content: req.message,
+        timestamp: new Date()
+      }];
     }
 
-    const lastMessage = req.messages[req.messages.length - 1];
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      throw APIError.invalidArgument("Messages array or message string is required");
+    }
+
+    const lastMessage = messages[messages.length - 1];
     if (!lastMessage || lastMessage.role !== 'user') {
       throw APIError.invalidArgument("Last message must be from user");
     }
@@ -191,7 +206,7 @@ export const chat = api(
           'Accept': 'application/json'
         },
         body: JSON.stringify({
-          messages: req.messages,
+          messages: messages,
           model: "gpt-3.5-turbo",
           temperature: 0.7
         })
@@ -255,9 +270,11 @@ export const chat = api(
 // Legacy exports for backward compatibility with tests
 export const generateCode = generate;
 export async function getModels() {
-  return [
-    { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
-    { id: "gpt-4", name: "GPT-4" },
-    { id: "claude-3-sonnet", name: "Claude 3 Sonnet" }
-  ];
+  return {
+    models: [
+      { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", capabilities: ["text-generation", "code-generation", "chat"] },
+      { id: "gpt-4", name: "GPT-4", capabilities: ["text-generation", "code-generation", "chat", "analysis"] },
+      { id: "claude-3-sonnet", name: "Claude 3 Sonnet", capabilities: ["text-generation", "code-generation", "chat"] }
+    ]
+  };
 }

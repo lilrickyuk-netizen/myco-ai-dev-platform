@@ -38,7 +38,7 @@ export const getDashboardState = api<void, DashboardState>(
   { expose: true, method: "GET", path: "/agent-monitor/dashboard", auth: true },
   async (): Promise<DashboardState> => {
     // Get active workflows
-    const workflows = await db.query`
+    const workflows = await db.queryAll`
       SELECT 
         w.id,
         w.project_id,
@@ -138,7 +138,7 @@ export const getDashboardState = api<void, DashboardState>(
     }
 
     // Calculate system metrics
-    const metricsResult = await db.query`
+    const metricsResult = await db.queryAll`
       SELECT 
         COUNT(*) FILTER (WHERE status IN ('running', 'pending')) as active_workflows,
         COUNT(*) FILTER (WHERE status = 'completed') as completed_workflows,
@@ -149,7 +149,7 @@ export const getDashboardState = api<void, DashboardState>(
       WHERE created_at > NOW() - INTERVAL '24 hours'
     `;
 
-    const agentUtilization = await db.query`
+    const agentUtilization = await db.queryAll`
       SELECT 
         type,
         COUNT(*) FILTER (WHERE status = 'running') as running_count,
@@ -173,7 +173,7 @@ export const getDashboardState = api<void, DashboardState>(
     };
 
     // Get recent activity
-    const recentActivity = await db.query`
+    const recentActivity = await db.queryAll`
       SELECT 
         apu.workflow_id,
         apu.agent_id,

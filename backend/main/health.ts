@@ -114,3 +114,6 @@ export const ready = api(
     };
   }
 );
+
+// Legacy export for test compatibility
+export const status = health;

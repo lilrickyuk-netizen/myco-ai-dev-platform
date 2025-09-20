@@ -1,5 +1,5 @@
 import { api, APIError } from "encore.dev/api";
-import type { FileNode, CreateFileRequest, UpdateFileRequest, FileListResponse } from "./types";
+import type { FileNode, CreateFileRequest, UpdateFileRequest, FileListResponse, WriteFileRequest, CreateDirectoryRequest } from "./types";
 import { getAuthData } from "~encore/auth";
 import db from "../db";
 
@@ -17,7 +17,7 @@ interface FileRow {
 }
 
 // Lists all files in a project as a hierarchical tree structure.
-export const listFiles = api(
+export const listFilesAPI = api(
   { expose: true, method: "GET", path: "/filesystem/:projectId", auth: true },
   async ({ projectId }: { projectId: string }): Promise<FileListResponse> => {
     if (!projectId || typeof projectId !== 'string') {
@@ -85,7 +85,7 @@ export const listFiles = api(
 );
 
 // Gets a specific file by ID.
-export const getFile = api(
+export const getFileAPI = api(
   { expose: true, method: "GET", path: "/filesystem/file/:id", auth: true },
   async ({ id }: { id: string }): Promise<FileNode> => {
     if (!id || typeof id !== 'string') {
@@ -124,7 +124,7 @@ export const getFile = api(
 );
 
 // Creates a new file or directory.
-export const createFile = api(
+export const createFileAPI = api(
   { expose: true, method: "POST", path: "/filesystem/file", auth: true },
   async (req: CreateFileRequest): Promise<FileNode> => {
     if (!req.projectId || !req.path || !req.type) {
@@ -202,7 +202,7 @@ export const createFile = api(
 );
 
 // Updates an existing file's content or metadata.
-export const updateFile = api(
+export const updateFileAPI = api(
   { expose: true, method: "PUT", path: "/filesystem/file/:id", auth: true },
   async ({ id, ...req }: UpdateFileRequest & { id: string }): Promise<FileNode> => {
     if (!id || typeof id !== 'string') {
@@ -257,7 +257,7 @@ export const updateFile = api(
 );
 
 // Deletes a file or directory and all its children.
-export const deleteFile = api(
+export const deleteFileAPI = api(
   { expose: true, method: "DELETE", path: "/filesystem/file/:id", auth: true },
   async ({ id }: { id: string }): Promise<{ success: boolean }> => {
     if (!id || typeof id !== 'string') {
@@ -298,3 +298,26 @@ export const deleteFile = api(
     return { success: true };
   }
 );
+
+// Legacy function versions that match test signatures
+export function readFile(fileId: string, _unusedParam?: any): Promise<FileNode> {
+  return getFileAPI({ id: fileId });
+}
+
+export function writeFile(fileId: string, req: WriteFileRequest): Promise<FileNode> {
+  return updateFileAPI({ id: fileId, content: req.content });  
+}
+
+export function createDirectory(projectId: string, req: CreateDirectoryRequest): Promise<FileNode> {
+  return createFileAPI({ projectId: req.projectId, path: req.path, type: 'directory' });
+}
+
+export function listFiles(projectId: string, _path?: string): Promise<FileListResponse> {
+  return listFilesAPI({ projectId });
+}
+
+// For API access, export the API functions with their original names
+export const getFile = getFileAPI;
+export const updateFile = updateFileAPI;
+export const createFile = createFileAPI;
+export const deleteFile = deleteFileAPI;

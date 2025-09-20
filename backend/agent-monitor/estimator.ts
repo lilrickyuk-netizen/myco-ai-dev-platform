@@ -66,7 +66,7 @@ export class CompletionTimeEstimator {
 
   static async estimateWorkflowCompletion(workflowId: string): Promise<Date | null> {
     try {
-      const workflow = await db.queryAll`
+      const workflow = await db.queryRow`
         SELECT w.*, 
                COUNT(a.id) as total_agents,
                COUNT(CASE WHEN a.status = 'completed' THEN 1 END) as completed_agents,
@@ -77,9 +77,9 @@ export class CompletionTimeEstimator {
         GROUP BY w.id, w.project_id, w.status, w.progress, w.started_at, w.estimated_completion_time, w.completed_at, w.current_phase, w.created_at, w.updated_at
       `;
 
-      if (!workflow.length) return null;
+      if (!workflow) return null;
 
-      const workflowData = workflow[0];
+      const workflowData = workflow;
       
       // Get all agents with their estimated completion times
       const agents = await db.queryAll`

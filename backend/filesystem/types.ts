@@ -21,6 +21,14 @@ export interface UpdateFileRequest {
   content: string;
 }
 
+// Legacy alias for test compatibility
+export interface WriteFileRequest extends UpdateFileRequest {}
+
+export interface CreateDirectoryRequest {
+  projectId: string;
+  path: string;
+}
+
 export interface FileListResponse {
   files: FileNode[];
 }

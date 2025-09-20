@@ -16,6 +16,10 @@ export interface GenerateRequest {
 
 export interface GenerateResponse {
   content: string;
+  code?: string;
+  explanation?: string;
+  framework?: string;
+  language?: string;
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -24,12 +28,20 @@ export interface GenerateResponse {
 }
 
 // Legacy types for backwards compatibility with tests
-export interface GenerateCodeRequest extends GenerateRequest {}
+export interface GenerateCodeRequest extends GenerateRequest {
+  framework?: string;
+  language?: string;
+}
 
 export interface ChatRequest {
   sessionId?: string;
-  messages: ChatMessage[];
+  messages?: ChatMessage[];
+  message?: string;
   projectId?: string;
+  context?: {
+    projectId: string;
+    files: any[];
+  };
 }
 
 export interface ChatResponse {
